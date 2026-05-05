@@ -88,8 +88,8 @@ function App() {
   };
 
   const structureAndSaveNote = async (text: string) => {
-    setCurrentView('processing');
     try {
+      setCurrentView('processing');
       const existingNotePayload = noteToUpdate
         ? { title: noteToUpdate.title, content: noteToUpdate.content }
         : undefined;

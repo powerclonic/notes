@@ -5,10 +5,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Note, NOTE_TYPE_LABELS, NOTE_TYPE_ICONS } from '@/types';
+import { Note, NoteType, NOTE_TYPE_LABELS, NOTE_TYPE_ICONS } from '@/types';
 import { ArrowLeft, FloppyDisk, Eye, PencilSimple } from '@phosphor-icons/react';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
-import { cn } from '@/lib/utils';
+
+const isValidNoteType = (type: unknown): type is NoteType =>
+  typeof type === 'string' && type in NOTE_TYPE_LABELS;
 
 interface NoteEditorProps {
   note: Note;
@@ -37,7 +39,7 @@ export function NoteEditor({ note, onSave, onCancel }: NoteEditorProps) {
           <ArrowLeft className="w-5 h-5" />
         </Button>
         <h2 className="text-xl font-bold text-foreground flex-1 truncate">Editar Nota</h2>
-        {note.noteType && (
+        {isValidNoteType(note.noteType) && (
           <Badge variant="secondary" className="shrink-0 text-xs">
             {NOTE_TYPE_ICONS[note.noteType]} {NOTE_TYPE_LABELS[note.noteType]}
           </Badge>
@@ -86,14 +88,14 @@ export function NoteEditor({ note, onSave, onCancel }: NoteEditorProps) {
           {isPreview ? (
             <Card className="flex-1">
               <CardContent className="pt-4 pb-4">
-                <MarkdownRenderer
-                  content={content}
-                  className={cn(
-                    'text-sm text-foreground min-h-[200px]',
-                    !content && 'text-muted-foreground italic'
-                  )}
-                />
-                {!content && <p className="text-sm text-muted-foreground italic">Sem conteúdo</p>}
+                {content ? (
+                  <MarkdownRenderer
+                    content={content}
+                    className="text-sm text-foreground min-h-[200px]"
+                  />
+                ) : (
+                  <p className="text-sm text-muted-foreground italic min-h-[200px]">Sem conteúdo</p>
+                )}
               </CardContent>
             </Card>
           ) : (

@@ -135,9 +135,9 @@ app.post('/api/structure', async (req: Request, res: Response) => {
 - Encoraje conexões criativas`,
     };
 
-    const typeInstruction = noteType && noteTypeInstructions[noteType]
-      ? noteTypeInstructions[noteType]
-      : noteTypeInstructions['anotacoes'];
+    const defaultInstruction = noteTypeInstructions['anotacoes'];
+    const typeInstruction =
+      (noteType && noteTypeInstructions[noteType]) || defaultInstruction;
 
     let prompt: string;
 

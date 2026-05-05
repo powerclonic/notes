@@ -1,4 +1,4 @@
-import { Note, NOTE_TYPE_LABELS, NOTE_TYPE_ICONS } from '@/types';
+import { Note, NOTE_TYPE_LABELS, NOTE_TYPE_ICONS, NoteType } from '@/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -24,6 +24,9 @@ interface NoteLibraryProps {
   onEdit: (note: Note) => void;
   onDelete: (noteId: string) => void;
 }
+
+const isValidNoteType = (type: unknown): type is NoteType =>
+  typeof type === 'string' && type in NOTE_TYPE_LABELS;
 
 export function NoteLibrary({ notes, onEdit, onDelete }: NoteLibraryProps) {
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
@@ -58,7 +61,7 @@ export function NoteLibrary({ notes, onEdit, onDelete }: NoteLibraryProps) {
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
-                      {note.noteType && (
+                      {isValidNoteType(note.noteType) && (
                         <Badge variant="secondary" className="text-xs shrink-0 font-normal">
                           {NOTE_TYPE_ICONS[note.noteType]} {NOTE_TYPE_LABELS[note.noteType]}
                         </Badge>
