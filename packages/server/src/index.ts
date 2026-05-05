@@ -167,10 +167,8 @@ app.post('/api/structure', async (req: Request, res: Response) => {
         'Use linguagem casual e acessível, com um tom descontraído e próximo do leitor.',
     };
 
-    const detailInstruction =
-      detailInstructions[config?.detailLevel ?? 'normal'] ?? detailInstructions['normal'];
-    const toneInstruction =
-      toneInstructions[config?.tone ?? 'neutro'] ?? toneInstructions['neutro'];
+    const detailInstruction = detailInstructions[config?.detailLevel ?? 'normal'];
+    const toneInstruction = toneInstructions[config?.tone ?? 'neutro'];
     const examplesInstruction = config?.includeExamples
       ? 'Quando relevante, adicione exemplos práticos para ilustrar os conceitos.'
       : 'Não adicione exemplos; mantenha o foco no conteúdo principal.';
