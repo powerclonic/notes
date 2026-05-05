@@ -22,6 +22,9 @@ app.use(express.json({ limit: '50mb' }));
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+const SYSTEM_PT_BR =
+  'Você é um assistente especializado. Responda SEMPRE em português brasileiro (pt-BR), sem exceções.';
+
 // Health check
 app.get('/api/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok' });
@@ -44,6 +47,10 @@ app.post('/api/ocr', async (req: Request, res: Response) => {
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [
+        {
+          role: 'system',
+          content: SYSTEM_PT_BR,
+        },
         {
           role: 'user',
           content: [
@@ -127,10 +134,15 @@ const DEFAULT_NOTE_INSTRUCTION = NOTE_TYPE_INSTRUCTIONS['anotacoes'];
  */
 app.post('/api/structure', async (req: Request, res: Response) => {
   try {
-    const { text, noteType, existingNote } = req.body as {
+    const { text, noteType, existingNote, config } = req.body as {
       text?: string;
       noteType?: string;
       existingNote?: { title: string; content: string };
+      config?: {
+        detailLevel?: 'resumido' | 'normal' | 'detalhado';
+        tone?: 'formal' | 'neutro' | 'casual';
+        includeExamples?: boolean;
+      };
     };
     if (!text) {
       res.status(400).json({ error: 'text is required' });
@@ -139,6 +151,29 @@ app.post('/api/structure', async (req: Request, res: Response) => {
 
     const typeInstruction =
       (noteType && NOTE_TYPE_INSTRUCTIONS[noteType]) || DEFAULT_NOTE_INSTRUCTION;
+
+    const detailInstructions: Record<string, string> = {
+      resumido: 'Seja conciso: escreva a nota de forma breve, destacando apenas os pontos essenciais.',
+      normal: 'Use um nível de detalhe equilibrado, cobrindo os pontos principais sem ser excessivo.',
+      detalhado:
+        'Seja abrangente: desenvolva cada ponto com profundidade, incluindo contexto e nuances importantes.',
+    };
+
+    const toneInstructions: Record<string, string> = {
+      formal:
+        'Use linguagem formal e profissional, evitando gírias ou expressões coloquiais.',
+      neutro: 'Use linguagem neutra e objetiva.',
+      casual:
+        'Use linguagem casual e acessível, com um tom descontraído e próximo do leitor.',
+    };
+
+    const detailInstruction =
+      detailInstructions[config?.detailLevel ?? 'normal'] ?? detailInstructions['normal'];
+    const toneInstruction =
+      toneInstructions[config?.tone ?? 'neutro'] ?? toneInstructions['neutro'];
+    const examplesInstruction = config?.includeExamples
+      ? 'Quando relevante, adicione exemplos práticos para ilustrar os conceitos.'
+      : 'Não adicione exemplos; mantenha o foco no conteúdo principal.';
 
     let prompt: string;
 
@@ -158,8 +193,11 @@ INSTRUÇÕES:
 2. Elimine redundâncias, mantendo informações únicas de ambos
 3. Corrija erros gramaticais e ortográficos
 4. ${typeInstruction}
-5. Gere um título conciso e descritivo (máximo 60 caracteres)
-6. Responda SEMPRE em português
+5. ${detailInstruction}
+6. ${toneInstruction}
+7. ${examplesInstruction}
+8. Gere um título conciso e descritivo (máximo 60 caracteres)
+9. Responda SEMPRE em português brasileiro
 
 Retorne como JSON:
 {
@@ -174,8 +212,11 @@ Suas tarefas:
 2. Adicione formatação adequada em Markdown (títulos, listas, negrito onde relevante)
 3. Organize o conteúdo em seções lógicas
 4. ${typeInstruction}
-5. Gere um título conciso e descritivo (máximo 60 caracteres)
-6. Responda SEMPRE em português
+5. ${detailInstruction}
+6. ${toneInstruction}
+7. ${examplesInstruction}
+8. Gere um título conciso e descritivo (máximo 60 caracteres)
+9. Responda SEMPRE em português brasileiro
 
 Retorne como JSON:
 {
@@ -189,6 +230,10 @@ Texto a estruturar: ${text}`;
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [
+        {
+          role: 'system',
+          content: SYSTEM_PT_BR,
+        },
         {
           role: 'user',
           content: prompt,
