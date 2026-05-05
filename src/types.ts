@@ -17,10 +17,27 @@ export interface ProcessedNote {
   title?: string;
 }
 
+export type NoteType = 'mapa-mental' | 'insights-corporativos' | 'anotacoes' | 'ideias';
+
+export const NOTE_TYPE_LABELS: Record<NoteType, string> = {
+  'mapa-mental': 'Mapa Mental',
+  'insights-corporativos': 'Insights Corporativos',
+  'anotacoes': 'Anotações',
+  'ideias': 'Ideias',
+};
+
+export const NOTE_TYPE_ICONS: Record<NoteType, string> = {
+  'mapa-mental': '🗺️',
+  'insights-corporativos': '💼',
+  'anotacoes': '📝',
+  'ideias': '💡',
+};
+
 export interface Note {
   id: string;
   title: string;
   content: string;
+  noteType?: NoteType;
   originalImage?: string;
   createdAt: number;
   updatedAt: number;
