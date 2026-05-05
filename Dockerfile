@@ -1,16 +1,27 @@
-# Stage 1: build
+# Stage 1: compile TypeScript to JavaScript
 FROM node:22-alpine AS builder
 WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY . .
-ARG VITE_API_BASE_URL=https://api-notes.dresch.dev.br
-ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
-RUN npm run build
 
-# Stage 2: serve with nginx
-FROM nginx:alpine
-COPY --from=builder /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+COPY package*.json ./
+COPY packages/server/package.json ./packages/server/
+RUN npm ci
+
+COPY packages/server/tsconfig.json ./packages/server/
+COPY packages/server/src ./packages/server/src
+RUN cd packages/server && ../../node_modules/.bin/tsc
+
+# Stage 2: lean production image
+FROM node:22-alpine
+WORKDIR /app
+
+COPY packages/server/package.json ./package.json
+RUN npm install --omit=dev
+
+COPY --from=builder /app/packages/server/dist ./dist
+
+EXPOSE 3001
+
+HEALTHCHECK --interval=10s --timeout=5s --retries=5 \
+  CMD wget -qO- http://localhost:3001/api/health || exit 1
+
+CMD ["node", "dist/index.js"]
