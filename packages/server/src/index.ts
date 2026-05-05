@@ -11,6 +11,10 @@ import { findByEmail, findById, createUser } from './users.js';
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Trust the first proxy so express-rate-limit can correctly read the client IP
+// from the X-Forwarded-For header (required when running behind a reverse proxy).
+app.set('trust proxy', 1);
+
 // Pre-generate a dummy hash at startup for constant-time login comparison.
 // This ensures the same bcrypt cost factor is always used regardless of code changes.
 const DUMMY_HASH_PROMISE: Promise<string> = bcrypt.hash('startup-dummy-value', 12);
@@ -245,7 +249,7 @@ Important guidelines:
         },
       ],
       response_format: { type: 'json_object' },
-      max_tokens: 4096,
+      max_completion_tokens: 4096,
     });
 
     const result = JSON.parse(response.choices[0].message.content ?? '{}');
@@ -393,7 +397,7 @@ Texto a estruturar: ${text}`;
         },
       ],
       response_format: { type: 'json_object' },
-      max_tokens: 4096,
+      max_completion_tokens: 4096,
     });
 
     const result = JSON.parse(response.choices[0].message.content ?? '{}');
