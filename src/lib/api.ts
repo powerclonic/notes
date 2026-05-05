@@ -15,6 +15,12 @@ export interface StructureResult {
   content: string;
 }
 
+export interface NoteConfigApi {
+  detailLevel?: string;
+  tone?: string;
+  includeExamples?: boolean;
+}
+
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? '';
 
 async function post<T>(path: string, body: unknown): Promise<T> {
@@ -39,7 +45,8 @@ export function processImageOcr(imageData: string): Promise<OcrResult> {
 export function structureNote(
   text: string,
   noteType?: string,
-  existingNote?: { title: string; content: string }
+  existingNote?: { title: string; content: string },
+  config?: NoteConfigApi
 ): Promise<StructureResult> {
-  return post<StructureResult>('/api/structure', { text, noteType, existingNote });
+  return post<StructureResult>('/api/structure', { text, noteType, existingNote, config });
 }

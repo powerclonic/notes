@@ -17,13 +17,27 @@ import { WordReviewInterface } from '@/components/WordReviewInterface';
 import { NoteLibrary } from '@/components/NoteLibrary';
 import { NoteEditor } from '@/components/NoteEditor';
 import { Camera, Upload, Sparkle, X } from '@phosphor-icons/react';
-import { Note, NoteType, UncertainWord, NOTE_TYPE_LABELS, NOTE_TYPE_ICONS } from './types';
+import {
+  Note,
+  NoteType,
+  NoteConfig,
+  DetailLevel,
+  WritingTone,
+  UncertainWord,
+  NOTE_TYPE_LABELS,
+  NOTE_TYPE_ICONS,
+  DETAIL_LEVEL_LABELS,
+  WRITING_TONE_LABELS,
+  DEFAULT_NOTE_CONFIG,
+} from './types';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 
 type AppView = 'home' | 'camera' | 'processing' | 'review' | 'edit';
 
 const NOTE_TYPES: NoteType[] = ['anotacoes', 'ideias', 'mapa-mental', 'insights-corporativos'];
+const DETAIL_LEVELS: DetailLevel[] = ['resumido', 'normal', 'detalhado'];
+const WRITING_TONES: WritingTone[] = ['formal', 'neutro', 'casual'];
 
 function App() {
   const [notes = [], setNotes] = useLocalStorage<Note[]>('notes', []);
@@ -35,6 +49,7 @@ function App() {
   const [activeTab, setActiveTab] = useState<string>('new');
   const [selectedNoteType, setSelectedNoteType] = useState<NoteType>('anotacoes');
   const [noteToUpdate, setNoteToUpdate] = useState<Note | null>(null);
+  const [noteConfig, setNoteConfig] = useState<NoteConfig>(DEFAULT_NOTE_CONFIG);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleImageCapture = (imageData: string) => {
@@ -94,7 +109,7 @@ function App() {
         ? { title: noteToUpdate.title, content: noteToUpdate.content }
         : undefined;
 
-      const result = await structureNote(text, selectedNoteType, existingNotePayload);
+      const result = await structureNote(text, selectedNoteType, existingNotePayload, noteConfig);
 
       if (noteToUpdate) {
         const updatedNote: Note = {
@@ -279,6 +294,65 @@ function App() {
                       </button>
                     ))}
                   </div>
+                </div>
+
+                {/* Detail level */}
+                <div>
+                  <p className="text-sm font-medium text-foreground mb-2">Nível de detalhe</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {DETAIL_LEVELS.map((level) => (
+                      <button
+                        key={level}
+                        onClick={() => setNoteConfig((c) => ({ ...c, detailLevel: level }))}
+                        className={`px-3 py-2 rounded-lg border text-sm font-medium transition-all ${
+                          noteConfig.detailLevel === level
+                            ? 'border-primary bg-primary/10 text-primary'
+                            : 'border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground'
+                        }`}
+                      >
+                        {DETAIL_LEVEL_LABELS[level]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Writing tone */}
+                <div>
+                  <p className="text-sm font-medium text-foreground mb-2">Tom de escrita</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {WRITING_TONES.map((tone) => (
+                      <button
+                        key={tone}
+                        onClick={() => setNoteConfig((c) => ({ ...c, tone }))}
+                        className={`px-3 py-2 rounded-lg border text-sm font-medium transition-all ${
+                          noteConfig.tone === tone
+                            ? 'border-primary bg-primary/10 text-primary'
+                            : 'border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground'
+                        }`}
+                      >
+                        {WRITING_TONE_LABELS[tone]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Include examples toggle */}
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium text-foreground">Incluir exemplos práticos</p>
+                  <button
+                    onClick={() => setNoteConfig((c) => ({ ...c, includeExamples: !c.includeExamples }))}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+                      noteConfig.includeExamples ? 'bg-primary' : 'bg-muted'
+                    }`}
+                    role="switch"
+                    aria-checked={noteConfig.includeExamples}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                        noteConfig.includeExamples ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
                 </div>
 
                 {/* Update existing note selector */}
