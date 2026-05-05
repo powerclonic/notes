@@ -325,9 +325,11 @@ function App() {
                           <SelectItem key={note.id} value={note.id}>
                             <span className="flex items-center gap-2">
                               {note.noteType && (
-                                <span>{NOTE_TYPE_ICONS[note.noteType]}</span>
+                                <span aria-label={NOTE_TYPE_LABELS[note.noteType]}>
+                                  {NOTE_TYPE_ICONS[note.noteType]}
+                                </span>
                               )}
-                              <span className="truncate max-w-[200px]">{note.title}</span>
+                              <span className="truncate max-w-[200px] md:max-w-[300px]">{note.title}</span>
                             </span>
                           </SelectItem>
                         ))}

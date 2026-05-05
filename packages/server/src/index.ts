@@ -94,6 +94,31 @@ Important guidelines:
   }
 });
 
+const NOTE_TYPE_INSTRUCTIONS: Record<string, string> = {
+  'mapa-mental': `Formate como um mapa mental em Markdown:
+- Use títulos (##) para os nós principais
+- Use listas aninhadas para sub-nós
+- Agrupe conceitos relacionados
+- Destaque conexões importantes em negrito`,
+  'insights-corporativos': `Formate como insights corporativos em Markdown:
+- Identifique e destaque os principais aprendizados
+- Use seções claras: Contexto, Insights, Ações Recomendadas
+- Use bullet points concisos
+- Destaque métricas ou dados relevantes em negrito`,
+  'anotacoes': `Formate como anotações estruturadas em Markdown:
+- Organize por tópicos com subtítulos
+- Mantenha fidelidade ao conteúdo original
+- Use listas para enumerações
+- Preserve a estrutura lógica do texto`,
+  'ideias': `Formate como registro de ideias em Markdown:
+- Destaque a ideia central em primeiro lugar
+- Use bullet points para desdobramentos
+- Adicione seções de "Possibilidades" e "Próximos Passos"
+- Encoraje conexões criativas`,
+};
+
+const DEFAULT_NOTE_INSTRUCTION = NOTE_TYPE_INSTRUCTIONS['anotacoes'];
+
 /**
  * POST /api/structure
  * Format raw text into a clean, well-organized note using gpt-4o.
@@ -112,32 +137,8 @@ app.post('/api/structure', async (req: Request, res: Response) => {
       return;
     }
 
-    const noteTypeInstructions: Record<string, string> = {
-      'mapa-mental': `Formate como um mapa mental em Markdown:
-- Use títulos (##) para os nós principais
-- Use listas aninhadas para sub-nós
-- Agrupe conceitos relacionados
-- Destaque conexões importantes em negrito`,
-      'insights-corporativos': `Formate como insights corporativos em Markdown:
-- Identifique e destaque os principais aprendizados
-- Use seções claras: Contexto, Insights, Ações Recomendadas
-- Use bullet points concisos
-- Destaque métricas ou dados relevantes em negrito`,
-      'anotacoes': `Formate como anotações estruturadas em Markdown:
-- Organize por tópicos com subtítulos
-- Mantenha fidelidade ao conteúdo original
-- Use listas para enumerações
-- Preserve a estrutura lógica do texto`,
-      'ideias': `Formate como registro de ideias em Markdown:
-- Destaque a ideia central em primeiro lugar
-- Use bullet points para desdobramentos
-- Adicione seções de "Possibilidades" e "Próximos Passos"
-- Encoraje conexões criativas`,
-    };
-
-    const defaultInstruction = noteTypeInstructions['anotacoes'];
     const typeInstruction =
-      (noteType && noteTypeInstructions[noteType]) || defaultInstruction;
+      (noteType && NOTE_TYPE_INSTRUCTIONS[noteType]) || DEFAULT_NOTE_INSTRUCTION;
 
     let prompt: string;
 

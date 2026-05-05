@@ -13,7 +13,8 @@ export function MarkdownRenderer({ content, className }: MarkdownRendererProps) 
     try {
       const rawHtml = marked.parse(content, { async: false }) as string;
       return DOMPurify.sanitize(rawHtml);
-    } catch {
+    } catch (error) {
+      console.error('Markdown parsing failed:', error);
       return DOMPurify.sanitize(content);
     }
   }, [content]);
