@@ -13,6 +13,8 @@ app.use(
       'http://localhost:5173',
       'http://localhost:3000',
       'http://localhost:4173',
+      'https://notes.dresch.dev.br',
+      'https://api-notes.dresch.dev.br',
     ],
   })
 );
