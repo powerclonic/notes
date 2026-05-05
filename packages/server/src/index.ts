@@ -182,11 +182,31 @@ app.get('/api/auth/me', requireAuth, (req: AuthRequest, res: Response) => {
   res.json({ id: user.id, email: user.email });
 });
 
+interface UncertainWordRaw {
+  word: string;
+  startIndex: number;
+  endIndex: number;
+  suggestions?: string[];
+  imageBbox?: {
+    xPercent: number;
+    yPercent: number;
+    widthPercent: number;
+    heightPercent: number;
+  };
+}
+
 /**
  * POST /api/ocr
  * Requires authentication.
  * Body: { imageData: string }  – base64 data-URL (e.g. data:image/jpeg;base64,...)
  * Response: { fullText: string, uncertainWords: UncertainWord[] }
+ *
+ * Uses a two-pass approach:
+ *   Pass 1 – extract text and identify uncertain words (no coordinates).
+ *   Pass 2 – given the same image and the list of uncertain words, locate
+ *            each one precisely and return accurate bounding boxes.
+ * Separating the concerns prevents the model from randomly guessing
+ * coordinates while it is busy reading text.
  */
 app.post('/api/ocr', requireAuth, ocrLimiter, async (req: AuthRequest, res: Response) => {
   try {
@@ -196,13 +216,13 @@ app.post('/api/ocr', requireAuth, ocrLimiter, async (req: AuthRequest, res: Resp
       return;
     }
 
-    const response = await openai.chat.completions.create({
+    // ------------------------------------------------------------------
+    // Pass 1: text extraction + uncertain-word identification (no bboxes)
+    // ------------------------------------------------------------------
+    const pass1Response = await openai.chat.completions.create({
       model: 'gpt-5.4-nano-2026-03-17',
       messages: [
-        {
-          role: 'system',
-          content: SYSTEM_PT_BR,
-        },
+        { role: 'system', content: SYSTEM_PT_BR },
         {
           role: 'user',
           content: [
@@ -210,41 +230,30 @@ app.post('/api/ocr', requireAuth, ocrLimiter, async (req: AuthRequest, res: Resp
               type: 'text',
               text: `You are an OCR expert specialized in reading handwritten notes and slide images.
 
-Analyze this image and extract ALL text visible in it. This could be handwritten notes, typed text on slides, or any other text.
+Analyze this image and extract ALL visible text, preserving paragraphs, bullet points, and line breaks.
 
-For each word you are uncertain about (due to poor handwriting, image quality, etc.), mark it as uncertain and include its approximate position in the image as percentage coordinates so the user can find it visually.
+For each word you are NOT fully confident about (poor handwriting, low contrast, ambiguous letterforms, etc.) mark it as uncertain and list up to three alternative readings as suggestions.
 
-Return your response as a JSON object with this exact structure:
+Return ONLY a JSON object with this structure:
 {
   "fullText": "the complete extracted text with all words in order",
   "uncertainWords": [
     {
-      "word": "the word you're uncertain about (as you read it from the image)",
-      "startIndex": <number: character position where word starts in fullText>,
-      "endIndex": <number: character position where word ends in fullText>,
-      "suggestions": ["alternative1", "alternative2"],
-      "imageBbox": {
-        "xPercent": <number 0-100: left edge of the word in the image>,
-        "yPercent": <number 0-100: top edge of the word in the image>,
-        "widthPercent": <number 0-100: width of the word bounding box>,
-        "heightPercent": <number 0-100: height of the word bounding box>
-      }
+      "word": "the word as you read it",
+      "startIndex": <character position where word starts in fullText>,
+      "endIndex": <character position where word ends in fullText>,
+      "suggestions": ["alternative1", "alternative2"]
     }
   ]
 }
 
-Important guidelines:
-- Extract ALL text you can see, maintaining original structure (paragraphs, bullet points, etc.)
-- Be honest about uncertainty – mark words you're not confident about
-- For handwritten text, be more cautious about certainty
-- Include proper line breaks to maintain text structure
-- Provide bounding boxes as percentages relative to full image dimensions (0-100). Add a small margin around the word so the user can see it clearly in context
-- If you see no text, return empty fullText and empty uncertainWords array`,
+Rules:
+- startIndex/endIndex must exactly match the slice of fullText where the word appears.
+- Do NOT include imageBbox – positions will be resolved in a separate step.
+- If there is no uncertain word, return an empty uncertainWords array.
+- If no text is visible, return empty fullText and empty uncertainWords array.`,
             },
-            {
-              type: 'image_url',
-              image_url: { url: imageData, detail: 'high' },
-            },
+            { type: 'image_url', image_url: { url: imageData, detail: 'high' } },
           ],
         },
       ],
@@ -252,8 +261,89 @@ Important guidelines:
       max_completion_tokens: 4096,
     });
 
-    const result = JSON.parse(response.choices[0].message.content ?? '{}');
-    res.json(result);
+    const pass1Result = JSON.parse(pass1Response.choices[0].message.content ?? '{}') as {
+      fullText?: string;
+      uncertainWords?: UncertainWordRaw[];
+    };
+
+    const fullText: string = pass1Result.fullText ?? '';
+    const uncertainWords: UncertainWordRaw[] = pass1Result.uncertainWords ?? [];
+
+    // ------------------------------------------------------------------
+    // Pass 2: locate each uncertain word in the image (bboxes only)
+    // Only performed when there are uncertain words to avoid extra cost.
+    // ------------------------------------------------------------------
+    if (uncertainWords.length > 0) {
+      // Build a numbered list giving surrounding context so the model can
+      // identify the exact occurrence of repeated words.
+      const wordList = uncertainWords
+        .map((w, i) => {
+          const contextStart = Math.max(0, w.startIndex - 30);
+          const contextEnd = Math.min(fullText.length, w.endIndex + 30);
+          const before = fullText.slice(contextStart, w.startIndex);
+          const after = fullText.slice(w.endIndex, contextEnd);
+          return `${i + 1}. word="${w.word}" context="...${before}[${w.word}]${after}..."`;
+        })
+        .join('\n');
+
+      const pass2Response = await openai.chat.completions.create({
+        model: 'gpt-5.4-nano-2026-03-17',
+        messages: [
+          { role: 'system', content: SYSTEM_PT_BR },
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: `This is the same image used for OCR. Below is a numbered list of words that were flagged as uncertain. Your task is ONLY to locate each word in the image and report its bounding box as percentages of the full image dimensions (0–100).
+
+Words to locate:
+${wordList}
+
+Instructions:
+- Look at the image carefully and find each word using the surrounding context as a guide.
+- Report the tightest rectangle that fully contains the word (a small margin of 1-2% is fine).
+- xPercent and yPercent are the top-left corner of the box.
+- widthPercent and heightPercent are the dimensions of the box.
+- If you cannot find a word, omit it from the results.
+
+Return ONLY a JSON object:
+{
+  "bboxes": [
+    {
+      "index": <1-based number matching the list above>,
+      "imageBbox": {
+        "xPercent": <number 0-100>,
+        "yPercent": <number 0-100>,
+        "widthPercent": <number 0-100>,
+        "heightPercent": <number 0-100>
+      }
+    }
+  ]
+}`,
+              },
+              { type: 'image_url', image_url: { url: imageData, detail: 'high' } },
+            ],
+          },
+        ],
+        response_format: { type: 'json_object' },
+        max_completion_tokens: 1024,
+      });
+
+      const pass2Result = JSON.parse(pass2Response.choices[0].message.content ?? '{}') as {
+        bboxes?: Array<{ index: number; imageBbox: UncertainWordRaw['imageBbox'] }>;
+      };
+
+      // Merge bboxes back into the uncertain words array (1-based index)
+      for (const entry of pass2Result.bboxes ?? []) {
+        const word = uncertainWords[entry.index - 1];
+        if (word && entry.imageBbox) {
+          word.imageBbox = entry.imageBbox;
+        }
+      }
+    }
+
+    res.json({ fullText, uncertainWords });
   } catch (error) {
     console.error('OCR error:', error);
     res.status(500).json({ error: 'Failed to process image' });
