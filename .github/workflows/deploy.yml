@@ -9,6 +9,8 @@ jobs:
   deploy:
     name: Build & Deploy
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
@@ -23,14 +25,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Quality gate: fail fast before triggering Coolify if the build is broken.
-      # Coolify will also build from the Dockerfile, but we catch errors here first.
+      # Quality gate: fail fast if the build is broken.
+      # Coolify auto-deploys via GitHub webhook on push to main.
       - name: Build
         run: npm run build
-
-      - name: Trigger Coolify deploy
-        run: |
-          curl --silent --fail --show-error \
-            --request GET \
-            --header "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}" \
-            "${{ secrets.COOLIFY_WEBHOOK_URL }}"
