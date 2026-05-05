@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react';
-import { useKV } from '@github/spark/hooks';
+import { useLocalStorage } from '@/hooks/useLocalStorage';
+import { processImageOcr, structureNote } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
@@ -15,7 +16,7 @@ import { motion } from 'framer-motion';
 type AppView = 'home' | 'camera' | 'processing' | 'review' | 'edit';
 
 function App() {
-  const [notes = [], setNotes] = useKV<Note[]>('notes', []);
+  const [notes = [], setNotes] = useLocalStorage<Note[]>('notes', []);
   const [currentView, setCurrentView] = useState<AppView>('home');
   const [currentImage, setCurrentImage] = useState<string | null>(null);
   const [extractedText, setExtractedText] = useState<string>('');
@@ -46,36 +47,7 @@ function App() {
 
   const processImage = async (imageData: string) => {
     try {
-      const prompt = window.spark.llmPrompt`You are an OCR expert specialized in reading handwritten notes and slide images. 
-
-Analyze this image and extract ALL text visible in it. This could be handwritten notes, typed text on slides, or any other text.
-
-For each word you extract, if you're uncertain about its accuracy (due to poor handwriting, image quality, etc.), mark it as uncertain.
-
-Return your response as a JSON object with this exact structure:
-{
-  "fullText": "the complete extracted text with all words in order",
-  "uncertainWords": [
-    {
-      "word": "the word you're uncertain about",
-      "startIndex": number (character position where word starts in fullText),
-      "endIndex": number (character position where word ends in fullText),
-      "suggestions": ["alternative1", "alternative2"] (optional, other possible readings)
-    }
-  ]
-}
-
-Important guidelines:
-- Extract ALL text you can see, maintaining original structure (paragraphs, bullet points, etc.)
-- Be honest about uncertainty - mark words you're not confident about
-- For handwritten text, be more cautious about certainty
-- Include proper line breaks to maintain text structure
-- If you see no text, return empty fullText and empty uncertainWords array
-
-Image to analyze: ${imageData}`;
-
-      const response = await window.spark.llm(prompt, 'gpt-4o', true);
-      const result = JSON.parse(response);
+      const result = await processImageOcr(imageData);
 
       if (!result.fullText || result.fullText.trim() === '') {
         toast.error('Nenhum texto foi detectado na imagem. Tente outra foto.');
@@ -105,24 +77,7 @@ Image to analyze: ${imageData}`;
 
   const structureAndSaveNote = async (text: string) => {
     try {
-      const prompt = window.spark.llmPrompt`You are a note formatting expert. Take this extracted text and structure it into a clean, well-formatted note.
-
-Your tasks:
-1. Fix any obvious spelling/grammar errors
-2. Add proper formatting (headings, bullet points, numbered lists where appropriate)
-3. Organize content into logical sections
-4. Generate a concise, descriptive title (max 60 characters)
-
-Return as JSON:
-{
-  "title": "A concise title for the note",
-  "content": "The formatted and structured content with proper line breaks and organization"
-}
-
-Text to structure: ${text}`;
-
-      const response = await window.spark.llm(prompt, 'gpt-4o', true);
-      const result = JSON.parse(response);
+      const result = await structureNote(text);
 
       const newNote: Note = {
         id: Date.now().toString(),
