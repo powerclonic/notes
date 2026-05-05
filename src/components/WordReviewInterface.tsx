@@ -192,7 +192,7 @@ export function WordReviewInterface({
         </Button>
       </div>
 
-      <Dialog open={editingWord !== null} onOpenChange={(open) => { if (!open) setEditingWord(null); }}>
+      <Dialog open={editingWord !== null} onOpenChange={() => setEditingWord(null)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">

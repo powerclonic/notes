@@ -95,7 +95,13 @@ app.post('/api/auth/register', authLimiter, async (req: Request, res: Response) 
       return;
     }
 
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    // Bounded length check before regex to prevent ReDoS
+    if (email.length > 254 || password.length > 128) {
+      res.status(400).json({ error: 'Email ou senha inválidos.' });
+      return;
+    }
+
+    const emailRegex = /^[^\s@]{1,64}@[^\s@]{1,253}\.[^\s@]{2,63}$/;
     if (!emailRegex.test(email)) {
       res.status(400).json({ error: 'Email inválido.' });
       return;
@@ -137,15 +143,10 @@ app.post('/api/auth/login', authLimiter, async (req: Request, res: Response) => 
     }
 
     const user = findByEmail(email);
-    if (!user) {
-      // Constant-time comparison to prevent timing attacks
-      await bcrypt.hash('dummy', 12);
-      res.status(401).json({ error: 'Email ou senha incorretos.' });
-      return;
-    }
-
-    const valid = await bcrypt.compare(password, user.passwordHash);
-    if (!valid) {
+    // Always run bcrypt.compare to ensure constant-time response regardless of whether user exists
+    const DUMMY_HASH = '$2b$12$WwubR/H5rjU/gR5P4wvASezSVAz.OWdOEb.x8cQb5F0.9M/VXzXZm';
+    const valid = await bcrypt.compare(password, user?.passwordHash ?? DUMMY_HASH);
+    if (!user || !valid) {
       res.status(401).json({ error: 'Email ou senha incorretos.' });
       return;
     }
