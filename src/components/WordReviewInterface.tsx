@@ -10,9 +10,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { UncertainWord } from '@/types';
+import { UncertainWord, ImageBbox } from '@/types';
 import { Badge } from '@/components/ui/badge';
-import { Check, Warning, Image } from '@phosphor-icons/react';
+import { Check, Warning, Image, CaretDown, CaretUp } from '@phosphor-icons/react';
 
 interface WordReviewInterfaceProps {
   text: string;
@@ -21,31 +21,50 @@ interface WordReviewInterfaceProps {
   onComplete: (correctedText: string) => void;
 }
 
-/** Crop a region of a base64 image into a new base64 PNG using a canvas. */
-function cropImage(
+/**
+ * Crop a region around the bbox (with padding for context) and draw an orange
+ * highlight rectangle around the exact word so the user can see it in context.
+ */
+function annotateImageRegion(
   imageData: string,
-  xPct: number,
-  yPct: number,
-  wPct: number,
-  hPct: number,
+  bbox: ImageBbox,
   callback: (cropped: string | null) => void
 ) {
   const img = new window.Image();
   img.onload = () => {
-    const x = (xPct / 100) * img.width;
-    const y = (yPct / 100) * img.height;
-    const w = (wPct / 100) * img.width;
-    const h = (hPct / 100) * img.height;
+    const padding = 10; // 10% padding in each direction for context
+    const rx = Math.max(0, bbox.xPercent - padding);
+    const ry = Math.max(0, bbox.yPercent - padding);
+    const rr = Math.min(100, bbox.xPercent + bbox.widthPercent + padding);
+    const rb = Math.min(100, bbox.yPercent + bbox.heightPercent + padding);
+    const rw = rr - rx;
+    const rh = rb - ry;
+
+    const cx = (rx / 100) * img.width;
+    const cy = (ry / 100) * img.height;
+    const cw = (rw / 100) * img.width;
+    const ch = (rh / 100) * img.height;
 
     const canvas = document.createElement('canvas');
-    canvas.width = Math.max(w, 1);
-    canvas.height = Math.max(h, 1);
+    canvas.width = Math.max(cw, 1);
+    canvas.height = Math.max(ch, 1);
     const ctx = canvas.getContext('2d');
     if (!ctx) {
       callback(null);
       return;
     }
-    ctx.drawImage(img, x, y, w, h, 0, 0, w, h);
+    ctx.drawImage(img, cx, cy, cw, ch, 0, 0, cw, ch);
+
+    // Draw orange highlight rectangle around the uncertain word within the crop
+    const wordX = ((bbox.xPercent - rx) / rw) * cw;
+    const wordY = ((bbox.yPercent - ry) / rh) * ch;
+    const wordW = (bbox.widthPercent / rw) * cw;
+    const wordH = (bbox.heightPercent / rh) * ch;
+
+    ctx.strokeStyle = '#f97316';
+    ctx.lineWidth = Math.max(2, cw * 0.004);
+    ctx.strokeRect(wordX - 2, wordY - 2, wordW + 4, wordH + 4);
+
     callback(canvas.toDataURL('image/png'));
   };
   img.onerror = () => callback(null);
@@ -62,20 +81,22 @@ export function WordReviewInterface({
   const [corrections, setCorrections] = useState<Map<number, string>>(new Map());
   const [editingWord, setEditingWord] = useState<UncertainWord | null>(null);
   const [correctionInput, setCorrectionInput] = useState('');
-  const [croppedImageUrl, setCroppedImageUrl] = useState<string | null>(null);
+  const [annotatedImageUrl, setAnnotatedImageUrl] = useState<string | null>(null);
+  const [showImagePanel, setShowImagePanel] = useState(true);
 
-  // Compute the cropped image whenever the editing word changes
+  // Compute the annotated context image whenever the editing word changes
   useEffect(() => {
-    setCroppedImageUrl(null);
+    setAnnotatedImageUrl(null);
     if (!editingWord?.imageBbox || !imageData) return;
 
-    const { xPercent, yPercent, widthPercent, heightPercent } = editingWord.imageBbox;
-    cropImage(imageData, xPercent, yPercent, widthPercent, heightPercent, (cropped) => {
-      setCroppedImageUrl(cropped);
+    annotateImageRegion(imageData, editingWord.imageBbox, (annotated) => {
+      setAnnotatedImageUrl(annotated);
     });
   }, [editingWord, imageData]);
 
   const openEditDialog = (word: UncertainWord) => {
+    const idx = uncertainWords.findIndex((w) => w.startIndex === word.startIndex);
+    if (idx !== -1) setCurrentWordIndex(idx);
     setEditingWord(word);
     setCorrectionInput(corrections.get(word.startIndex) || word.word);
   };
@@ -161,7 +182,7 @@ export function WordReviewInterface({
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <div>
           <h3 className="text-xl font-semibold text-foreground">Revisão de Palavras</h3>
           <p className="text-sm text-muted-foreground mt-1">
@@ -173,7 +194,62 @@ export function WordReviewInterface({
         </Badge>
       </div>
 
-      <div className="flex-1 overflow-auto bg-card rounded-lg p-6 border border-border mb-6">
+      {/* Original image panel with bbox overlays */}
+      {imageData && (
+        <div className="mb-4 rounded-lg border border-border overflow-hidden bg-muted/20">
+          <button
+            className="w-full flex items-center justify-between px-4 py-2 text-sm font-medium text-foreground hover:bg-muted/40 transition-colors"
+            onClick={() => setShowImagePanel((v) => !v)}
+          >
+            <span className="flex items-center gap-1.5">
+              <Image className="w-4 h-4" weight="duotone" />
+              Imagem original
+            </span>
+            {showImagePanel ? (
+              <CaretUp className="w-4 h-4 text-muted-foreground" />
+            ) : (
+              <CaretDown className="w-4 h-4 text-muted-foreground" />
+            )}
+          </button>
+          {showImagePanel && (
+            <div className="relative max-h-52 overflow-hidden">
+              <img
+                src={imageData}
+                alt="Imagem original"
+                className="w-full object-contain"
+              />
+              {uncertainWords.map((word, idx) => {
+                if (!word.imageBbox) return null;
+                const { xPercent, yPercent, widthPercent, heightPercent } = word.imageBbox;
+                const isCurrent = idx === currentWordIndex;
+                const isReviewed = corrections.has(word.startIndex);
+                return (
+                  <div
+                    key={`bbox-${word.startIndex}`}
+                    className={`absolute cursor-pointer border-2 transition-all ${
+                      isReviewed
+                        ? 'border-green-500 bg-green-500/10'
+                        : isCurrent
+                        ? 'border-orange-500 bg-orange-500/20'
+                        : 'border-orange-400/70 bg-orange-400/10 hover:border-orange-500 hover:bg-orange-500/20'
+                    }`}
+                    style={{
+                      left: `${xPercent}%`,
+                      top: `${yPercent}%`,
+                      width: `${widthPercent}%`,
+                      height: `${heightPercent}%`,
+                    }}
+                    onClick={() => openEditDialog(word)}
+                    title={word.word}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="flex-1 overflow-auto bg-card rounded-lg p-6 border border-border mb-4">
         <div className="text-base leading-relaxed whitespace-pre-wrap font-body">
           {renderTextWithHighlights()}
         </div>
@@ -199,25 +275,24 @@ export function WordReviewInterface({
               Corrigir Palavra
             </DialogTitle>
             <DialogDescription>
-              A IA não conseguiu identificar esta palavra com certeza. Veja a imagem abaixo e
-              corrija se necessário.
+              A IA não conseguiu identificar esta palavra com certeza. Veja o trecho da imagem
+              abaixo (palavra destacada em laranja) e corrija se necessário.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            {/* Image crop showing the uncertain word in context */}
+            {/* Annotated image region showing word in context with highlight */}
             <div className="space-y-1.5">
               <Label className="flex items-center gap-1.5">
                 <Image className="w-4 h-4" weight="duotone" />
                 Palavra na imagem
               </Label>
               <div className="rounded-lg border border-border overflow-hidden bg-muted/40 flex items-center justify-center min-h-[80px]">
-                {croppedImageUrl ? (
+                {annotatedImageUrl ? (
                   <img
-                    src={croppedImageUrl}
-                    alt="Recorte da palavra na imagem original"
-                    className="max-w-full max-h-48 object-contain"
-                    style={{ imageRendering: 'pixelated' }}
+                    src={annotatedImageUrl}
+                    alt="Trecho da imagem com a palavra destacada em laranja"
+                    className="max-w-full max-h-56 object-contain"
                   />
                 ) : imageData && editingWord?.imageBbox ? (
                   <span className="text-xs text-muted-foreground py-4">Carregando...</span>

@@ -193,7 +193,7 @@ app.post('/api/ocr', requireAuth, ocrLimiter, async (req: AuthRequest, res: Resp
     }
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: 'gpt-5.4-nano-2026-03-17',
       messages: [
         {
           role: 'system',
@@ -381,7 +381,7 @@ Texto a estruturar: ${text}`;
     }
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: 'gpt-5.4-nano-2026-03-17',
       messages: [
         {
           role: 'system',
