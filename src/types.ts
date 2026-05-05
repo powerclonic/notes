@@ -1,8 +1,16 @@
+export interface ImageBbox {
+  xPercent: number;
+  yPercent: number;
+  widthPercent: number;
+  heightPercent: number;
+}
+
 export interface UncertainWord {
   word: string;
   startIndex: number;
   endIndex: number;
   suggestions?: string[];
+  imageBbox?: ImageBbox;
 }
 
 export interface ProcessedNote {

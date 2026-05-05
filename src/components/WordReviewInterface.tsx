@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect, type ReactElement } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -12,23 +12,69 @@ import {
 } from '@/components/ui/dialog';
 import { UncertainWord } from '@/types';
 import { Badge } from '@/components/ui/badge';
-import { Check, Warning } from '@phosphor-icons/react';
+import { Check, Warning, Image } from '@phosphor-icons/react';
 
 interface WordReviewInterfaceProps {
   text: string;
   uncertainWords: UncertainWord[];
+  imageData: string | null;
   onComplete: (correctedText: string) => void;
+}
+
+/** Crop a region of a base64 image into a new base64 PNG using a canvas. */
+function cropImage(
+  imageData: string,
+  xPct: number,
+  yPct: number,
+  wPct: number,
+  hPct: number,
+  callback: (cropped: string | null) => void
+) {
+  const img = new window.Image();
+  img.onload = () => {
+    const x = (xPct / 100) * img.width;
+    const y = (yPct / 100) * img.height;
+    const w = (wPct / 100) * img.width;
+    const h = (hPct / 100) * img.height;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(w, 1);
+    canvas.height = Math.max(h, 1);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      callback(null);
+      return;
+    }
+    ctx.drawImage(img, x, y, w, h, 0, 0, w, h);
+    callback(canvas.toDataURL('image/png'));
+  };
+  img.onerror = () => callback(null);
+  img.src = imageData;
 }
 
 export function WordReviewInterface({
   text,
   uncertainWords,
+  imageData,
   onComplete,
 }: WordReviewInterfaceProps) {
   const [currentWordIndex, setCurrentWordIndex] = useState(0);
   const [corrections, setCorrections] = useState<Map<number, string>>(new Map());
   const [editingWord, setEditingWord] = useState<UncertainWord | null>(null);
   const [correctionInput, setCorrectionInput] = useState('');
+  const [croppedImageUrl, setCroppedImageUrl] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Compute the cropped image whenever the editing word changes
+  useEffect(() => {
+    setCroppedImageUrl(null);
+    if (!editingWord?.imageBbox || !imageData) return;
+
+    const { xPercent, yPercent, widthPercent, heightPercent } = editingWord.imageBbox;
+    cropImage(imageData, xPercent, yPercent, widthPercent, heightPercent, (cropped) => {
+      setCroppedImageUrl(cropped);
+    });
+  }, [editingWord, imageData]);
 
   const openEditDialog = (word: UncertainWord) => {
     setEditingWord(word);
@@ -52,6 +98,7 @@ export function WordReviewInterface({
     if (currentWordIndex < uncertainWords.length - 1) {
       setCurrentWordIndex(currentWordIndex + 1);
     }
+    setEditingWord(null);
   };
 
   const completeReview = () => {
@@ -72,7 +119,7 @@ export function WordReviewInterface({
   };
 
   const renderTextWithHighlights = () => {
-    const parts: JSX.Element[] = [];
+    const parts: ReactElement[] = [];
     let lastIndex = 0;
 
     const sortedWords = [...uncertainWords].sort((a, b) => a.startIndex - b.startIndex);
@@ -145,7 +192,7 @@ export function WordReviewInterface({
         </Button>
       </div>
 
-      <Dialog open={editingWord !== null} onOpenChange={() => setEditingWord(null)}>
+      <Dialog open={editingWord !== null} onOpenChange={(open) => { if (!open) setEditingWord(null); }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -153,22 +200,45 @@ export function WordReviewInterface({
               Corrigir Palavra
             </DialogTitle>
             <DialogDescription>
-              A IA não conseguiu identificar esta palavra com certeza. Por favor, corrija se
-              necessário.
+              A IA não conseguiu identificar esta palavra com certeza. Veja a imagem abaixo e
+              corrija se necessário.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-4">
+          <div className="space-y-4 py-2">
+            {/* Image crop showing the uncertain word in context */}
+            <div className="space-y-1.5">
+              <Label className="flex items-center gap-1.5">
+                <Image className="w-4 h-4" weight="duotone" />
+                Palavra na imagem
+              </Label>
+              <div className="rounded-lg border border-border overflow-hidden bg-muted/40 flex items-center justify-center min-h-[80px]">
+                {croppedImageUrl ? (
+                  <img
+                    src={croppedImageUrl}
+                    alt="Recorte da palavra na imagem original"
+                    className="max-w-full max-h-48 object-contain"
+                    style={{ imageRendering: 'pixelated' }}
+                  />
+                ) : imageData && editingWord?.imageBbox ? (
+                  <span className="text-xs text-muted-foreground py-4">Carregando...</span>
+                ) : (
+                  <span className="text-xs text-muted-foreground py-4">
+                    Sem posição disponível
+                  </span>
+                )}
+              </div>
+            </div>
+
             <div className="space-y-2">
-              <Label htmlFor="correction-input">Palavra detectada</Label>
+              <Label htmlFor="correction-input">Correção</Label>
               <Input
                 id="correction-input"
+                ref={inputRef}
                 value={correctionInput}
                 onChange={(e) => setCorrectionInput(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    saveCorrection();
-                  }
+                  if (e.key === 'Enter') saveCorrection();
                 }}
                 autoFocus
               />
@@ -206,3 +276,4 @@ export function WordReviewInterface({
     </div>
   );
 }
+

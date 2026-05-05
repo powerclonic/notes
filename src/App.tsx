@@ -1,6 +1,8 @@
 import { useState, useRef } from 'react';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { processImageOcr, structureNote } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
+import { LoginPage } from '@/components/LoginPage';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
@@ -16,7 +18,7 @@ import { CameraCapture } from '@/components/CameraCapture';
 import { WordReviewInterface } from '@/components/WordReviewInterface';
 import { NoteLibrary } from '@/components/NoteLibrary';
 import { NoteEditor } from '@/components/NoteEditor';
-import { Camera, Upload, Sparkle, X } from '@phosphor-icons/react';
+import { Camera, Upload, Sparkle, X, SignOut } from '@phosphor-icons/react';
 import {
   Note,
   NoteType,
@@ -40,7 +42,10 @@ const DETAIL_LEVELS: DetailLevel[] = ['resumido', 'normal', 'detalhado'];
 const WRITING_TONES: WritingTone[] = ['formal', 'neutro', 'casual'];
 
 function App() {
-  const [notes = [], setNotes] = useLocalStorage<Note[]>('notes', []);
+  const { user, isLoading, logout } = useAuth();
+  // Notes keyed per user to isolate data between accounts
+  const notesKey = user ? `notes_${user.id}` : 'notes';
+  const [notes = [], setNotes] = useLocalStorage<Note[]>(notesKey, []);
   const [currentView, setCurrentView] = useState<AppView>('home');
   const [currentImage, setCurrentImage] = useState<string | null>(null);
   const [extractedText, setExtractedText] = useState<string>('');
@@ -183,6 +188,22 @@ function App() {
     toast.success('Nota excluída com sucesso!');
   };
 
+  // Auth loading splash
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <motion.div animate={{ rotate: 360 }} transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}>
+          <Sparkle className="w-10 h-10 text-accent" weight="fill" />
+        </motion.div>
+      </div>
+    );
+  }
+
+  // Gate all app views behind authentication
+  if (!user) {
+    return <LoginPage />;
+  }
+
   if (currentView === 'camera') {
     return (
       <div className="h-screen">
@@ -224,6 +245,7 @@ function App() {
           <WordReviewInterface
             text={extractedText}
             uncertainWords={uncertainWords}
+            imageData={currentImage}
             onComplete={handleReviewComplete}
           />
         </div>
@@ -252,11 +274,22 @@ function App() {
     <div className="min-h-screen bg-background">
       <div className="max-w-2xl mx-auto px-4 pt-6 pb-8 space-y-5">
         {/* Header */}
-        <header className="space-y-0.5">
-          <h1 className="text-3xl font-bold text-foreground tracking-tight">NoteSnap</h1>
-          <p className="text-sm text-muted-foreground">
-            Transforme imagens em notas estruturadas com IA
-          </p>
+        <header className="flex items-start justify-between">
+          <div className="space-y-0.5">
+            <h1 className="text-3xl font-bold text-foreground tracking-tight">NoteSnap</h1>
+            <p className="text-sm text-muted-foreground">
+              Transforme imagens em notas estruturadas com IA
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="mt-1 text-muted-foreground hover:text-foreground"
+            onClick={logout}
+            title={`Sair (${user.email})`}
+          >
+            <SignOut className="w-5 h-5" />
+          </Button>
         </header>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
