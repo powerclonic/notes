@@ -83,7 +83,7 @@ export function LoginPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
-                  autoComplete={mode === 'login' ? 'email' : 'email'}
+                  autoComplete="email"
                 />
               </div>
 

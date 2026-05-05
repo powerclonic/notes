@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type ReactElement } from 'react';
+import { useState, useEffect, type ReactElement } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -63,7 +63,6 @@ export function WordReviewInterface({
   const [editingWord, setEditingWord] = useState<UncertainWord | null>(null);
   const [correctionInput, setCorrectionInput] = useState('');
   const [croppedImageUrl, setCroppedImageUrl] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   // Compute the cropped image whenever the editing word changes
   useEffect(() => {
@@ -234,7 +233,6 @@ export function WordReviewInterface({
               <Label htmlFor="correction-input">Correção</Label>
               <Input
                 id="correction-input"
-                ref={inputRef}
                 value={correctionInput}
                 onChange={(e) => setCorrectionInput(e.target.value)}
                 onKeyDown={(e) => {

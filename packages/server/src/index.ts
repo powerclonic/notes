@@ -11,6 +11,10 @@ import { findByEmail, findById, createUser } from './users.js';
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Pre-generate a dummy hash at startup for constant-time login comparison.
+// This ensures the same bcrypt cost factor is always used regardless of code changes.
+const DUMMY_HASH_PROMISE: Promise<string> = bcrypt.hash('startup-dummy-value', 12);
+
 app.use(
   cors({
     origin: [
@@ -101,7 +105,9 @@ app.post('/api/auth/register', authLimiter, async (req: Request, res: Response) 
       return;
     }
 
-    const emailRegex = /^[^\s@]{1,64}@[^\s@]{1,253}\.[^\s@]{2,63}$/;
+    // Validate basic email structure: local@domain.tld
+    // Bounded quantifiers to prevent ReDoS; allows subdomains and ccTLDs (e.g. co.uk)
+    const emailRegex = /^[^\s@]{1,64}@(?:[a-zA-Z0-9-]{1,63}\.)+[a-zA-Z]{2,63}$/;
     if (!emailRegex.test(email)) {
       res.status(400).json({ error: 'Email inválido.' });
       return;
@@ -143,9 +149,9 @@ app.post('/api/auth/login', authLimiter, async (req: Request, res: Response) => 
     }
 
     const user = findByEmail(email);
-    // Always run bcrypt.compare to ensure constant-time response regardless of whether user exists
-    const DUMMY_HASH = '$2b$12$WwubR/H5rjU/gR5P4wvASezSVAz.OWdOEb.x8cQb5F0.9M/VXzXZm';
-    const valid = await bcrypt.compare(password, user?.passwordHash ?? DUMMY_HASH);
+    // Always run bcrypt.compare to ensure constant-time response and prevent user-enumeration
+    const dummyHash = await DUMMY_HASH_PROMISE;
+    const valid = await bcrypt.compare(password, user?.passwordHash ?? dummyHash);
     if (!user || !valid) {
       res.status(401).json({ error: 'Email ou senha incorretos.' });
       return;
@@ -403,7 +409,5 @@ app.listen(PORT, () => {
   if (!process.env.OPENAI_API_KEY) {
     console.warn('⚠️  WARNING: OPENAI_API_KEY is not set – requests will fail');
   }
-  if (!process.env.JWT_SECRET) {
-    console.warn('⚠️  WARNING: JWT_SECRET is not set – using default insecure secret');
-  }
+  // JWT_SECRET warnings are handled in auth.ts at module load time
 });
