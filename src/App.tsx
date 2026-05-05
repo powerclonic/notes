@@ -41,6 +41,14 @@ const NOTE_TYPES: NoteType[] = ['anotacoes', 'ideias', 'mapa-mental', 'insights-
 const DETAIL_LEVELS: DetailLevel[] = ['resumido', 'normal', 'detalhado'];
 const WRITING_TONES: WritingTone[] = ['formal', 'neutro', 'casual'];
 
+const BUILD_INFO = `v${__APP_VERSION__} · ${new Date(__BUILD_TIME__).toLocaleString('pt-BR', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+})}`;
+
 function App() {
   const { user, isLoading, logout } = useAuth();
   // Notes keyed per user to isolate data between accounts
@@ -188,7 +196,38 @@ function App() {
     toast.success('Nota excluída com sucesso!');
   };
 
-  // Auth loading splash
+  const handleMergeNotes = async (noteIds: string[]) => {
+    const toMerge = notes.filter((n) => noteIds.includes(n.id));
+    if (toMerge.length < 2) return;
+
+    const combinedText = toMerge
+      .map((n) => `## ${n.title}\n\n${n.content}`)
+      .join('\n\n---\n\n');
+
+    const mergeNoteType = toMerge[0].noteType ?? selectedNoteType;
+
+    try {
+      setCurrentView('processing');
+      const result = await structureNote(combinedText, mergeNoteType, undefined, noteConfig);
+      const mergedNote: Note = {
+        id: crypto.randomUUID(),
+        title: result.title || 'Nota mesclada',
+        content: result.content || combinedText,
+        noteType: mergeNoteType,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      setNotes((currentNotes = []) => [mergedNote, ...currentNotes]);
+      toast.success('Notas juntadas com sucesso!', { description: mergedNote.title });
+    } catch {
+      toast.error('Erro ao juntar notas. Tente novamente.');
+    } finally {
+      setCurrentView('home');
+      setActiveTab('library');
+    }
+  };
+
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -280,6 +319,7 @@ function App() {
             <p className="text-sm text-muted-foreground">
               Transforme imagens em notas estruturadas com IA
             </p>
+            <p className="text-xs text-muted-foreground/60">{BUILD_INFO}</p>
           </div>
           <Button
             variant="ghost"
@@ -497,6 +537,7 @@ function App() {
               notes={notes}
               onEdit={handleEditNote}
               onDelete={handleDeleteNote}
+              onMerge={handleMergeNotes}
             />
           </TabsContent>
         </Tabs>
