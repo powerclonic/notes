@@ -36,6 +36,10 @@ export function processImageOcr(imageData: string): Promise<OcrResult> {
 }
 
 /** Structure raw text into a titled, formatted note via the backend. */
-export function structureNote(text: string): Promise<StructureResult> {
-  return post<StructureResult>('/api/structure', { text });
+export function structureNote(
+  text: string,
+  noteType?: string,
+  existingNote?: { title: string; content: string }
+): Promise<StructureResult> {
+  return post<StructureResult>('/api/structure', { text, noteType, existingNote });
 }

@@ -94,18 +94,96 @@ Important guidelines:
   }
 });
 
+const NOTE_TYPE_INSTRUCTIONS: Record<string, string> = {
+  'mapa-mental': `Formate como um mapa mental em Markdown:
+- Use títulos (##) para os nós principais
+- Use listas aninhadas para sub-nós
+- Agrupe conceitos relacionados
+- Destaque conexões importantes em negrito`,
+  'insights-corporativos': `Formate como insights corporativos em Markdown:
+- Identifique e destaque os principais aprendizados
+- Use seções claras: Contexto, Insights, Ações Recomendadas
+- Use bullet points concisos
+- Destaque métricas ou dados relevantes em negrito`,
+  'anotacoes': `Formate como anotações estruturadas em Markdown:
+- Organize por tópicos com subtítulos
+- Mantenha fidelidade ao conteúdo original
+- Use listas para enumerações
+- Preserve a estrutura lógica do texto`,
+  'ideias': `Formate como registro de ideias em Markdown:
+- Destaque a ideia central em primeiro lugar
+- Use bullet points para desdobramentos
+- Adicione seções de "Possibilidades" e "Próximos Passos"
+- Encoraje conexões criativas`,
+};
+
+const DEFAULT_NOTE_INSTRUCTION = NOTE_TYPE_INSTRUCTIONS['anotacoes'];
+
 /**
  * POST /api/structure
  * Format raw text into a clean, well-organized note using gpt-4o.
- * Body: { text: string }
+ * Body: { text: string, noteType?: string, existingNote?: { title: string, content: string } }
  * Response: { title: string, content: string }
  */
 app.post('/api/structure', async (req: Request, res: Response) => {
   try {
-    const { text } = req.body as { text?: string };
+    const { text, noteType, existingNote } = req.body as {
+      text?: string;
+      noteType?: string;
+      existingNote?: { title: string; content: string };
+    };
     if (!text) {
       res.status(400).json({ error: 'text is required' });
       return;
+    }
+
+    const typeInstruction =
+      (noteType && NOTE_TYPE_INSTRUCTIONS[noteType]) || DEFAULT_NOTE_INSTRUCTION;
+
+    let prompt: string;
+
+    if (existingNote) {
+      prompt = `Você é um especialista em organização de notas. Sua tarefa é ATUALIZAR uma nota existente incorporando novo conteúdo extraído.
+
+NOTA EXISTENTE:
+Título: ${existingNote.title}
+Conteúdo:
+${existingNote.content}
+
+NOVO CONTEÚDO EXTRAÍDO:
+${text}
+
+INSTRUÇÕES:
+1. Mescle o novo conteúdo com a nota existente de forma coesa
+2. Elimine redundâncias, mantendo informações únicas de ambos
+3. Corrija erros gramaticais e ortográficos
+4. ${typeInstruction}
+5. Gere um título conciso e descritivo (máximo 60 caracteres)
+6. Responda SEMPRE em português
+
+Retorne como JSON:
+{
+  "title": "Título conciso para a nota",
+  "content": "Conteúdo formatado e estruturado em Markdown com quebras de linha adequadas"
+}`;
+    } else {
+      prompt = `Você é um especialista em formatação de notas. Transforme o texto extraído em uma nota limpa e bem organizada.
+
+Suas tarefas:
+1. Corrija erros gramaticais e ortográficos óbvios
+2. Adicione formatação adequada em Markdown (títulos, listas, negrito onde relevante)
+3. Organize o conteúdo em seções lógicas
+4. ${typeInstruction}
+5. Gere um título conciso e descritivo (máximo 60 caracteres)
+6. Responda SEMPRE em português
+
+Retorne como JSON:
+{
+  "title": "Título conciso para a nota",
+  "content": "Conteúdo formatado e estruturado em Markdown com quebras de linha adequadas"
+}
+
+Texto a estruturar: ${text}`;
     }
 
     const response = await openai.chat.completions.create({
@@ -113,21 +191,7 @@ app.post('/api/structure', async (req: Request, res: Response) => {
       messages: [
         {
           role: 'user',
-          content: `You are a note formatting expert. Take this extracted text and structure it into a clean, well-formatted note.
-
-Your tasks:
-1. Fix any obvious spelling/grammar errors
-2. Add proper formatting (headings, bullet points, numbered lists where appropriate)
-3. Organize content into logical sections
-4. Generate a concise, descriptive title (max 60 characters)
-
-Return as JSON:
-{
-  "title": "A concise title for the note",
-  "content": "The formatted and structured content with proper line breaks and organization"
-}
-
-Text to structure: ${text}`,
+          content: prompt,
         },
       ],
       response_format: { type: 'json_object' },
