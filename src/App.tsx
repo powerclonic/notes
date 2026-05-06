@@ -214,7 +214,7 @@ function App() {
         structureAndSaveNote(combinedText);
       }
     } catch (error) {
-      toast.error('Erro ao processar imagem. Tente novamente.');
+      toast.error(error instanceof Error ? error.message : 'Erro ao processar imagem. Tente novamente.');
       console.error(error);
       setProcessingProgress(null);
       setCurrentView('home');
@@ -324,8 +324,8 @@ function App() {
         )
       );
       toast.success('Nota atualizada com sucesso!');
-    } catch {
-      toast.error('Erro ao atualizar nota. Tente novamente.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Erro ao atualizar nota. Tente novamente.');
     }
     setEditingNote(null);
     setCurrentView('home');
@@ -336,8 +336,8 @@ function App() {
       await removeNote(noteId);
       setNotes((prev) => prev.filter((note) => note.id !== noteId));
       toast.success('Nota excluída com sucesso!');
-    } catch {
-      toast.error('Erro ao excluir nota. Tente novamente.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Erro ao excluir nota. Tente novamente.');
     }
   };
 
@@ -367,8 +367,8 @@ function App() {
       await saveNote({ ...mergedNote, noteType: mergedNote.noteType });
       setNotes((prev) => [mergedNote, ...prev]);
       toast.success('Notas juntadas com sucesso!', { description: mergedNote.title });
-    } catch {
-      toast.error('Erro ao juntar notas. Tente novamente.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Erro ao juntar notas. Tente novamente.');
     } finally {
       setCurrentView('home');
       setActiveTab('library');
@@ -403,8 +403,8 @@ function App() {
       await saveNote({ ...newNote, noteType: newNote.noteType });
       setNotes((prev) => [newNote, ...prev]);
       toast.success('Nota gerada com sucesso!', { description: newNote.title });
-    } catch {
-      toast.error('Erro ao gerar nota. Tente novamente.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Erro ao gerar nota. Tente novamente.');
     } finally {
       setCurrentView('home');
       setActiveTab('library');
@@ -452,8 +452,8 @@ function App() {
       setSlidesSelectedNotes(new Set());
       setShowSlidesForm(false);
       setActiveTab('library');
-    } catch {
-      toast.error('Erro ao gerar slides. Tente novamente.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Erro ao gerar slides. Tente novamente.');
     } finally {
       setCurrentView('home');
     }
