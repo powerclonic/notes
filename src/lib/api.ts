@@ -96,9 +96,10 @@ export function generateNoteFromNotes(
 export function generateSlides(
   prompt: string,
   context: string,
-  config?: NoteConfigApi
+  config?: NoteConfigApi,
+  notesContext?: string
 ): Promise<StructureResult> {
-  return post<StructureResult>('/api/slides', { prompt, context, config });
+  return post<StructureResult>('/api/slides', { prompt, context, config, notesContext });
 }
 
 /** Register a new user. */

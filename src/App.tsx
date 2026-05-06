@@ -71,6 +71,7 @@ function App() {
   const [slidesPrompt, setSlidesPrompt] = useState('');
   const [slidesContext, setSlidesContext] = useState('');
   const [slidesContextError, setSlidesContextError] = useState(false);
+  const [slidesSelectedNotes, setSlidesSelectedNotes] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleImageCapture = (imageData: string | string[]) => {
@@ -312,11 +313,22 @@ function App() {
       setSlidesContextError(true);
       return;
     }
-    if (!slidesPrompt.trim()) return;
 
     try {
       setCurrentView('processing');
-      const result = await generateSlides(slidesPrompt, slidesContext, noteConfig);
+
+      // Get selected notes for context
+      const selectedNotesForSlides = notes.filter((n) => slidesSelectedNotes.has(n.id));
+      const notesContext = selectedNotesForSlides.length > 0
+        ? selectedNotesForSlides.map((n) => `## ${n.title}\n\n${n.content}`).join('\n\n---\n\n')
+        : undefined;
+
+      const result = await generateSlides(
+        slidesPrompt || slidesContext,
+        slidesContext,
+        noteConfig,
+        notesContext
+      );
       const newNote: Note = {
         id: crypto.randomUUID(),
         title: result.title || 'Slides',
@@ -329,6 +341,7 @@ function App() {
       toast.success('Slides gerados com sucesso!', { description: newNote.title });
       setSlidesPrompt('');
       setSlidesContext('');
+      setSlidesSelectedNotes(new Set());
       setShowSlidesForm(false);
       setActiveTab('library');
     } catch {
@@ -655,7 +668,7 @@ function App() {
                 <div className="flex items-center justify-between mb-2">
                   <div>
                     <p className="text-sm font-medium text-foreground">🎞️ Modo Slide</p>
-                    <p className="text-xs text-muted-foreground">Gere uma estrutura de slides com IA</p>
+                    <p className="text-xs text-muted-foreground">Gere slides baseados em suas notas</p>
                   </div>
                   <Button
                     size="sm"
@@ -669,37 +682,67 @@ function App() {
                 </div>
                 {showSlidesForm && (
                   <div className="space-y-3 mt-3 border-t border-border pt-3">
+                    {notes.length > 0 && (
+                      <div>
+                        <label className="text-xs font-medium text-muted-foreground block mb-1.5">
+                          Notas de referência <span className="text-muted-foreground font-normal">(opcional)</span>
+                        </label>
+                        <div className="space-y-1.5 max-h-32 overflow-y-auto border border-border rounded-lg p-2 bg-muted/20">
+                          {notes.map((note) => (
+                            <label
+                              key={note.id}
+                              className="flex items-center gap-2 p-1.5 rounded hover:bg-muted/50 cursor-pointer text-sm"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={slidesSelectedNotes.has(note.id)}
+                                onChange={(e) => {
+                                  setSlidesSelectedNotes((prev) => {
+                                    const next = new Set(prev);
+                                    if (e.target.checked) next.add(note.id);
+                                    else next.delete(note.id);
+                                    return next;
+                                  });
+                                }}
+                                className="w-3.5 h-3.5"
+                              />
+                              <span className="flex-1 truncate text-xs">{note.title}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <div>
                       <label className="text-xs font-medium text-muted-foreground block mb-1">
-                        Contexto da apresentação <span className="text-destructive">*</span>
+                        Onde será usada? <span className="text-destructive">*</span>
                       </label>
-                      <Textarea
+                      <Input
                         value={slidesContext}
                         onChange={(e) => {
                           setSlidesContext(e.target.value);
                           if (e.target.value.trim()) setSlidesContextError(false);
                         }}
                         placeholder="Ex: Aula de química para o ensino médio"
-                        className={`text-sm min-h-[56px] resize-none ${slidesContextError ? 'border-destructive' : ''}`}
+                        className={`text-sm ${slidesContextError ? 'border-destructive' : ''}`}
                       />
                       {slidesContextError && (
-                        <p className="text-xs text-destructive mt-1">O contexto da apresentação é obrigatório.</p>
+                        <p className="text-xs text-destructive mt-1">Este campo é obrigatório.</p>
                       )}
                     </div>
                     <div>
                       <label className="text-xs font-medium text-muted-foreground block mb-1">
-                        Prompt / conteúdo dos slides
+                        Conteúdo adicional <span className="text-muted-foreground font-normal">(opcional)</span>
                       </label>
                       <Textarea
                         value={slidesPrompt}
                         onChange={(e) => setSlidesPrompt(e.target.value)}
-                        placeholder="Descreva o conteúdo ou tópicos que devem aparecer nos slides..."
-                        className="text-sm min-h-[80px] resize-none"
+                        placeholder="Tópicos extras ou instruções específicas..."
+                        className="text-sm min-h-[56px] resize-none"
                       />
                     </div>
                     <Button
                       onClick={handleGenerateSlides}
-                      disabled={!slidesPrompt.trim()}
+                      disabled={!slidesContext.trim()}
                       className="w-full gap-1.5"
                     >
                       <Sparkle className="w-4 h-4" />
