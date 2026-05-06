@@ -9,8 +9,10 @@ NoteSnap é uma aplicação web que transforma imagens de anotações manuscrita
 - **Revisão inteligente** – palavras com baixa confiança são destacadas para revisão. O diálogo de correção mostra o **recorte da imagem original** no local exato da palavra, dando contexto visual ao usuário.
 - **Estruturação automática** – organiza o texto extraído em notas formatadas em Markdown com títulos, listas e hierarquia.
 - **Tipos de nota** – Anotações, Mapa Mental, Insights Corporativos e Ideias, cada um com instruções de formatação específicas.
+- **Geração de slides** – crie apresentações estruturadas baseadas em suas notas existentes, com contexto e objetivo personalizados.
 - **Configuração de saída** – escolha o nível de detalhe (resumido/normal/detalhado), o tom de escrita (formal/neutro/casual) e se deseja exemplos práticos.
 - **Atualização de notas** – incorpore novo conteúdo a uma nota já existente.
+- **Junção e geração de notas** – combine múltiplas notas ou gere novas a partir de notas existentes com instruções personalizadas.
 - **Biblioteca de notas** – visualize, edite, pesquise e exclua notas salvas.
 - **Autenticação segura** – cadastro e login com email/senha. Senhas armazenadas com bcrypt (cost 12). Sessão via JWT (7 dias).
 - **Rate limiting** – proteção contra abuso nas APIs de OCR, estruturação e autenticação.
@@ -86,6 +88,8 @@ Todos os endpoints (exceto `/api/health`, `/api/auth/register` e `/api/auth/logi
 | `GET` | `/api/auth/me` | Dados do usuário logado |
 | `POST` | `/api/ocr` | Extração de texto de imagem |
 | `POST` | `/api/structure` | Estruturação de nota |
+| `POST` | `/api/generate` | Geração de nova nota a partir de notas existentes |
+| `POST` | `/api/slides` | Geração de slides estruturados |
 
 ### Rate limits
 
@@ -95,6 +99,8 @@ Todos os endpoints (exceto `/api/health`, `/api/auth/register` e `/api/auth/logi
 | `/api/auth/*` | 10 req / 15 min por IP |
 | `/api/ocr` | 30 req / hora por IP |
 | `/api/structure` | 60 req / hora por IP |
+| `/api/generate` | 60 req / hora por IP |
+| `/api/slides` | 60 req / hora por IP |
 
 ## Licença
 

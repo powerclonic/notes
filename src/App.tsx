@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { processImageOcr, structureNote, generateNoteFromNotes, generateSlides } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
@@ -71,6 +72,7 @@ function App() {
   const [slidesPrompt, setSlidesPrompt] = useState('');
   const [slidesContext, setSlidesContext] = useState('');
   const [slidesContextError, setSlidesContextError] = useState(false);
+  const [slidesSelectedNotes, setSlidesSelectedNotes] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleImageCapture = (imageData: string | string[]) => {
@@ -258,7 +260,7 @@ function App() {
       setCurrentView('processing');
       const result = await structureNote(combinedText, mergeNoteType, undefined, noteConfig);
       const mergedNote: Note = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         title: result.title || 'Nota mesclada',
         content: result.content || combinedText,
         noteType: mergeNoteType,
@@ -290,7 +292,7 @@ function App() {
         noteConfig
       );
       const newNote: Note = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         title: result.title || 'Nota gerada',
         content: result.content || '',
         noteType: genNoteType,
@@ -312,13 +314,24 @@ function App() {
       setSlidesContextError(true);
       return;
     }
-    if (!slidesPrompt.trim()) return;
 
     try {
       setCurrentView('processing');
-      const result = await generateSlides(slidesPrompt, slidesContext, noteConfig);
+
+      // Get selected notes for context
+      const selectedNotesForSlides = notes.filter((n) => slidesSelectedNotes.has(n.id));
+      const notesContext = selectedNotesForSlides.length > 0
+        ? selectedNotesForSlides.map((n) => `## ${n.title}\n\n${n.content}`).join('\n\n---\n\n')
+        : undefined;
+
+      const result = await generateSlides(
+        slidesPrompt || slidesContext,
+        slidesContext,
+        noteConfig,
+        notesContext
+      );
       const newNote: Note = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         title: result.title || 'Slides',
         content: result.content || '',
         noteType: 'slides',
@@ -329,6 +342,7 @@ function App() {
       toast.success('Slides gerados com sucesso!', { description: newNote.title });
       setSlidesPrompt('');
       setSlidesContext('');
+      setSlidesSelectedNotes(new Set());
       setShowSlidesForm(false);
       setActiveTab('library');
     } catch {
@@ -459,152 +473,7 @@ function App() {
           </TabsList>
 
           <TabsContent value="new" className="space-y-3">
-            {/* Note type selector */}
-            <Card>
-              <CardContent className="pt-4 pb-4 space-y-3">
-                <div>
-                  <p className="text-sm font-medium text-foreground mb-2">Tipo de nota</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {NOTE_TYPES.map((type) => (
-                      <button
-                        key={type}
-                        onClick={() => setSelectedNoteType(type)}
-                        className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm font-medium transition-all ${
-                          selectedNoteType === type
-                            ? 'border-primary bg-primary/10 text-primary'
-                            : 'border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground'
-                        }`}
-                      >
-                        <span className="text-base">{NOTE_TYPE_ICONS[type]}</span>
-                        <span className="truncate">{NOTE_TYPE_LABELS[type]}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Detail level */}
-                <div>
-                  <p className="text-sm font-medium text-foreground mb-2">Nível de detalhe</p>
-                  <div className="grid grid-cols-3 gap-2">
-                    {DETAIL_LEVELS.map((level) => (
-                      <button
-                        key={level}
-                        onClick={() => setNoteConfig((c) => ({ ...c, detailLevel: level }))}
-                        className={`px-3 py-2 rounded-lg border text-sm font-medium transition-all ${
-                          noteConfig.detailLevel === level
-                            ? 'border-primary bg-primary/10 text-primary'
-                            : 'border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground'
-                        }`}
-                      >
-                        {DETAIL_LEVEL_LABELS[level]}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Writing tone */}
-                <div>
-                  <p className="text-sm font-medium text-foreground mb-2">Tom de escrita</p>
-                  <div className="grid grid-cols-3 gap-2">
-                    {WRITING_TONES.map((tone) => (
-                      <button
-                        key={tone}
-                        onClick={() => setNoteConfig((c) => ({ ...c, tone }))}
-                        className={`px-3 py-2 rounded-lg border text-sm font-medium transition-all ${
-                          noteConfig.tone === tone
-                            ? 'border-primary bg-primary/10 text-primary'
-                            : 'border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground'
-                        }`}
-                      >
-                        {WRITING_TONE_LABELS[tone]}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Include examples toggle */}
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium text-foreground">Incluir exemplos práticos</p>
-                  <button
-                    onClick={() => setNoteConfig((c) => ({ ...c, includeExamples: !c.includeExamples }))}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
-                      noteConfig.includeExamples ? 'bg-primary' : 'bg-muted'
-                    }`}
-                    role="switch"
-                    aria-checked={noteConfig.includeExamples}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                        noteConfig.includeExamples ? 'translate-x-6' : 'translate-x-1'
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                {/* Update existing note selector */}
-                <div>
-                  <p className="text-sm font-medium text-foreground mb-2">
-                    Atualizar nota existente{' '}
-                    <span className="text-muted-foreground font-normal">(opcional)</span>
-                  </p>
-                  {noteToUpdate ? (
-                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-primary/40 bg-primary/5">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{noteToUpdate.title}</p>
-                        {noteToUpdate.noteType && (
-                          <p className="text-xs text-muted-foreground">
-                            {NOTE_TYPE_ICONS[noteToUpdate.noteType]} {NOTE_TYPE_LABELS[noteToUpdate.noteType]}
-                          </p>
-                        )}
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 shrink-0"
-                        onClick={() => setNoteToUpdate(null)}
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </Button>
-                    </div>
-                  ) : notes.length > 0 ? (
-                    <Select
-                      value=""
-                      onValueChange={(id) => {
-                        const found = notes.find((n) => n.id === id);
-                        if (found) {
-                          setNoteToUpdate(found);
-                          if (found.noteType) setSelectedNoteType(found.noteType);
-                        }
-                      }}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Selecionar nota para atualizar..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {notes.map((note) => (
-                          <SelectItem key={note.id} value={note.id}>
-                            <span className="flex items-center gap-2">
-                              {note.noteType && (
-                                <span aria-label={NOTE_TYPE_LABELS[note.noteType]}>
-                                  {NOTE_TYPE_ICONS[note.noteType]}
-                                </span>
-                              )}
-                              <span className="truncate max-w-[200px] md:max-w-[300px]">{note.title}</span>
-                            </span>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <p className="text-xs text-muted-foreground italic">
-                      Nenhuma nota salva ainda
-                    </p>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Capture/Upload buttons */}
+            {/* Capture/Upload buttons - Primary action */}
             <div className="grid grid-cols-2 gap-3">
               <Button
                 size="lg"
@@ -635,19 +504,171 @@ function App() {
               />
             </div>
 
-            {/* Nota theme input */}
-            <div>
-              <label className="text-sm font-medium text-foreground block mb-1.5">
-                Temática da nota{' '}
-                <span className="text-muted-foreground font-normal">(opcional)</span>
-              </label>
-              <Input
-                value={noteTheme}
-                onChange={(e) => setNoteTheme(e.target.value)}
-                placeholder="Ex: Química orgânica, Reunião de vendas..."
-                className="text-sm"
-              />
-            </div>
+            {/* Note configuration */}
+            <Card>
+              <CardContent className="pt-4 pb-4 space-y-3">
+                {/* Note type selector */}
+                <div>
+                  <p className="text-sm font-medium text-foreground mb-2">Tipo de nota</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {NOTE_TYPES.map((type) => (
+                      <button
+                        key={type}
+                        onClick={() => setSelectedNoteType(type)}
+                        className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm font-medium transition-all ${
+                          selectedNoteType === type
+                            ? 'border-primary bg-primary/10 text-primary'
+                            : 'border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground'
+                        }`}
+                      >
+                        <span className="text-base">{NOTE_TYPE_ICONS[type]}</span>
+                        <span className="truncate">{NOTE_TYPE_LABELS[type]}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Theme input */}
+                <div>
+                  <label className="text-sm font-medium text-foreground block mb-1.5">
+                    Temática <span className="text-muted-foreground font-normal text-xs">(opcional)</span>
+                  </label>
+                  <Input
+                    value={noteTheme}
+                    onChange={(e) => setNoteTheme(e.target.value)}
+                    placeholder="Ex: Química orgânica, Reunião de vendas..."
+                    className="text-sm"
+                  />
+                </div>
+
+                {/* Update existing note selector */}
+                {notes.length > 0 && (
+                  <div>
+                    <p className="text-sm font-medium text-foreground mb-2">
+                      Atualizar nota existente{' '}
+                      <span className="text-muted-foreground font-normal text-xs">(opcional)</span>
+                    </p>
+                    {noteToUpdate ? (
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-primary/40 bg-primary/5">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{noteToUpdate.title}</p>
+                          {noteToUpdate.noteType && (
+                            <p className="text-xs text-muted-foreground">
+                              {NOTE_TYPE_ICONS[noteToUpdate.noteType]} {NOTE_TYPE_LABELS[noteToUpdate.noteType]}
+                            </p>
+                          )}
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 shrink-0"
+                          onClick={() => setNoteToUpdate(null)}
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <Select
+                        value=""
+                        onValueChange={(id) => {
+                          const found = notes.find((n) => n.id === id);
+                          if (found) {
+                            setNoteToUpdate(found);
+                            if (found.noteType) setSelectedNoteType(found.noteType);
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Selecionar nota..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {notes.map((note) => (
+                            <SelectItem key={note.id} value={note.id}>
+                              <span className="flex items-center gap-2">
+                                {note.noteType && (
+                                  <span aria-label={NOTE_TYPE_LABELS[note.noteType]}>
+                                    {NOTE_TYPE_ICONS[note.noteType]}
+                                  </span>
+                                )}
+                                <span className="truncate max-w-[200px] md:max-w-[300px]">{note.title}</span>
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                )}
+
+                {/* Collapsible advanced options */}
+                <details className="group">
+                  <summary className="text-sm font-medium text-muted-foreground cursor-pointer list-none flex items-center gap-1.5 hover:text-foreground transition-colors">
+                    <span className="text-xs transform group-open:rotate-90 transition-transform">▶</span>
+                    Opções avançadas
+                  </summary>
+                  <div className="mt-3 space-y-3 pt-3 border-t border-border">
+                    {/* Detail level */}
+                    <div>
+                      <p className="text-sm font-medium text-foreground mb-2">Nível de detalhe</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        {DETAIL_LEVELS.map((level) => (
+                          <button
+                            key={level}
+                            onClick={() => setNoteConfig((c) => ({ ...c, detailLevel: level }))}
+                            className={`px-3 py-2 rounded-lg border text-sm font-medium transition-all ${
+                              noteConfig.detailLevel === level
+                                ? 'border-primary bg-primary/10 text-primary'
+                                : 'border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground'
+                            }`}
+                          >
+                            {DETAIL_LEVEL_LABELS[level]}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Writing tone */}
+                    <div>
+                      <p className="text-sm font-medium text-foreground mb-2">Tom de escrita</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        {WRITING_TONES.map((tone) => (
+                          <button
+                            key={tone}
+                            onClick={() => setNoteConfig((c) => ({ ...c, tone }))}
+                            className={`px-3 py-2 rounded-lg border text-sm font-medium transition-all ${
+                              noteConfig.tone === tone
+                                ? 'border-primary bg-primary/10 text-primary'
+                                : 'border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground'
+                            }`}
+                          >
+                            {WRITING_TONE_LABELS[tone]}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Include examples toggle */}
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium text-foreground">Incluir exemplos práticos</p>
+                      <button
+                        onClick={() => setNoteConfig((c) => ({ ...c, includeExamples: !c.includeExamples }))}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+                          noteConfig.includeExamples ? 'bg-primary' : 'bg-muted'
+                        }`}
+                        role="switch"
+                        aria-checked={noteConfig.includeExamples}
+                      >
+                        <span
+                          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                            noteConfig.includeExamples ? 'translate-x-6' : 'translate-x-1'
+                          }`}
+                        />
+                      </button>
+                    </div>
+                  </div>
+                </details>
+              </CardContent>
+            </Card>
 
             {/* Slide mode */}
             <Card>
@@ -655,7 +676,7 @@ function App() {
                 <div className="flex items-center justify-between mb-2">
                   <div>
                     <p className="text-sm font-medium text-foreground">🎞️ Modo Slide</p>
-                    <p className="text-xs text-muted-foreground">Gere uma estrutura de slides com IA</p>
+                    <p className="text-xs text-muted-foreground">Gere slides baseados em suas notas</p>
                   </div>
                   <Button
                     size="sm"
@@ -669,37 +690,67 @@ function App() {
                 </div>
                 {showSlidesForm && (
                   <div className="space-y-3 mt-3 border-t border-border pt-3">
+                    {notes.length > 0 && (
+                      <div>
+                        <label className="text-xs font-medium text-muted-foreground block mb-1.5">
+                          Notas de referência <span className="text-muted-foreground font-normal">(opcional)</span>
+                        </label>
+                        <div className="space-y-1.5 max-h-32 overflow-y-auto border border-border rounded-lg p-2 bg-muted/20">
+                          {notes.map((note) => (
+                            <label
+                              key={note.id}
+                              className="flex items-center gap-2 p-1.5 rounded hover:bg-muted/50 cursor-pointer text-sm"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={slidesSelectedNotes.has(note.id)}
+                                onChange={(e) => {
+                                  setSlidesSelectedNotes((prev) => {
+                                    const next = new Set(prev);
+                                    if (e.target.checked) next.add(note.id);
+                                    else next.delete(note.id);
+                                    return next;
+                                  });
+                                }}
+                                className="w-3.5 h-3.5"
+                              />
+                              <span className="flex-1 truncate text-xs">{note.title}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <div>
                       <label className="text-xs font-medium text-muted-foreground block mb-1">
-                        Contexto da apresentação <span className="text-destructive">*</span>
+                        Onde será usada? <span className="text-destructive">*</span>
                       </label>
-                      <Textarea
+                      <Input
                         value={slidesContext}
                         onChange={(e) => {
                           setSlidesContext(e.target.value);
                           if (e.target.value.trim()) setSlidesContextError(false);
                         }}
                         placeholder="Ex: Aula de química para o ensino médio"
-                        className={`text-sm min-h-[56px] resize-none ${slidesContextError ? 'border-destructive' : ''}`}
+                        className={`text-sm ${slidesContextError ? 'border-destructive' : ''}`}
                       />
                       {slidesContextError && (
-                        <p className="text-xs text-destructive mt-1">O contexto da apresentação é obrigatório.</p>
+                        <p className="text-xs text-destructive mt-1">Este campo é obrigatório.</p>
                       )}
                     </div>
                     <div>
                       <label className="text-xs font-medium text-muted-foreground block mb-1">
-                        Prompt / conteúdo dos slides
+                        Conteúdo adicional <span className="text-muted-foreground font-normal">(opcional)</span>
                       </label>
                       <Textarea
                         value={slidesPrompt}
                         onChange={(e) => setSlidesPrompt(e.target.value)}
-                        placeholder="Descreva o conteúdo ou tópicos que devem aparecer nos slides..."
-                        className="text-sm min-h-[80px] resize-none"
+                        placeholder="Tópicos extras ou instruções específicas..."
+                        className="text-sm min-h-[56px] resize-none"
                       />
                     </div>
                     <Button
                       onClick={handleGenerateSlides}
-                      disabled={!slidesPrompt.trim()}
+                      disabled={!slidesContext.trim()}
                       className="w-full gap-1.5"
                     >
                       <Sparkle className="w-4 h-4" />

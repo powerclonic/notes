@@ -577,14 +577,15 @@ Retorne SOMENTE JSON compacto: {"t":"título","c":"conteúdo markdown"}`;
 /**
  * POST /api/slides
  * Requires authentication.
- * Body: { prompt: string, context: string, noteType?: string, config?: NoteConfigApi }
+ * Body: { prompt: string, context: string, config?: NoteConfigApi, notesContext?: string }
  * Response: { title: string, content: string }
  */
 app.post('/api/slides', requireAuth, structureLimiter, async (req: AuthRequest, res: Response) => {
   try {
-    const { prompt, context, config } = req.body as {
+    const { prompt, context, config, notesContext } = req.body as {
       prompt?: string;
       context?: string;
+      notesContext?: string;
       config?: {
         detailLevel?: 'resumido' | 'normal' | 'detalhado';
         tone?: 'formal' | 'neutro' | 'casual';
@@ -592,8 +593,8 @@ app.post('/api/slides', requireAuth, structureLimiter, async (req: AuthRequest, 
       };
     };
 
-    if (!prompt || !context) {
-      res.status(400).json({ error: 'prompt e context são obrigatórios' });
+    if (!context) {
+      res.status(400).json({ error: 'context é obrigatório' });
       return;
     }
 
@@ -604,10 +605,13 @@ app.post('/api/slides', requireAuth, structureLimiter, async (req: AuthRequest, 
     };
     const detailInstruction = detailInstructions[config?.detailLevel ?? 'normal'];
 
+    const notesSection = notesContext
+      ? `\n\nNOTAS DE REFERÊNCIA:\n${notesContext}\n\nUse essas notas como base para o conteúdo dos slides.`
+      : '';
+
     const aiPrompt = `Crie uma estrutura de slides para uma apresentação.
 
-CONTEXTO DA APRESENTAÇÃO: ${context}
-CONTEÚDO/PROMPT: ${prompt}
+CONTEXTO DA APRESENTAÇÃO: ${context}${notesSection}${prompt ? `\nINSTRUÇÕES ADICIONAIS: ${prompt}` : ''}
 QUANTIDADE: ${detailInstruction}
 
 Cada slide deve ter título (heading), conteúdo (bullets ou texto) e notas do apresentador.
