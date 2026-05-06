@@ -738,11 +738,104 @@ Retorne SOMENTE JSON compacto: {"t":"título","c":"conteúdo markdown"}`;
   }
 });
 
+// ---------------------------------------------------------------------------
+// SlideFramework DSL documentation embedded in the system prompt
+// ---------------------------------------------------------------------------
+
+const SLIDE_FRAMEWORK_DOCS = `
+# SlideFramework DSL
+
+Use este formato para criar apresentações de slides. Cada slide é um bloco delimitado por @@SLIDE e @@END.
+
+## Layouts disponíveis
+
+### layout=title  (slide de título — OBRIGATÓRIO como primeiro slide)
+@@SLIDE layout=title
+@@TITLE Título principal da apresentação
+@@SUBTITLE Subtítulo ou descrição breve
+@@NOTES Notas do apresentador (opcional)
+@@END
+
+### layout=section  (divisor de seção)
+@@SLIDE layout=section
+@@HEADING Nome da Seção
+@@NOTES Notas (opcional)
+@@END
+
+### layout=bullets  (conteúdo com tópicos — layout mais comum)
+@@SLIDE layout=bullets
+@@HEADING Título do Slide
+@@TEXT Parágrafo introdutório opcional
+@@BULLET Ponto principal 1
+@@BULLET Ponto principal 2
+@@SUBBULLET Detalhe do ponto 2
+@@BULLET Ponto principal 3
+@@NOTES Notas do apresentador
+@@END
+
+### layout=image-text  (imagem à esquerda, texto à direita)
+@@SLIDE layout=image-text
+@@HEADING Título do Slide
+@@IMAGE Descrição visual detalhada do que a imagem deveria mostrar
+@@TEXT Texto explicativo que acompanha a imagem.
+@@NOTES Notas
+@@END
+
+### layout=image-bullets  (imagem à esquerda, tópicos à direita)
+@@SLIDE layout=image-bullets
+@@HEADING Título do Slide
+@@IMAGE Descrição visual da imagem
+@@BULLET Tópico 1
+@@BULLET Tópico 2
+@@NOTES Notas
+@@END
+
+### layout=two-col  (duas colunas lado a lado)
+@@SLIDE layout=two-col
+@@HEADING Título Geral do Slide
+@@COL1
+@@COLHEADING Título Coluna Esquerda
+@@TEXT Texto da coluna esquerda.
+@@BULLET Item esquerdo 1
+@@COL1END
+@@COL2
+@@COLHEADING Título Coluna Direita
+@@BULLET Item direito 1
+@@BULLET Item direito 2
+@@COL2END
+@@NOTES Notas
+@@END
+
+### layout=quote  (citação de destaque)
+@@SLIDE layout=quote
+@@QUOTE Texto da citação aqui, sem aspas.
+@@AUTHOR Nome do Autor ou Fonte
+@@NOTES Notas
+@@END
+
+### layout=closing  (encerramento — OBRIGATÓRIO como último slide)
+@@SLIDE layout=closing
+@@TITLE Obrigado!
+@@SUBTITLE Perguntas e discussão
+@@NOTES Agradeça a audiência e abra para perguntas.
+@@END
+
+## Regras obrigatórias
+1. SEMPRE comece com @@SLIDE layout=title e termine com @@SLIDE layout=closing.
+2. Cada diretiva ocupa UMA linha. Nunca quebre conteúdo em múltiplas linhas.
+3. Use @@NOTES em todos os slides com uma dica para o apresentador.
+4. Em @@IMAGE, descreva detalhadamente o que a imagem deveria mostrar (gráfico, foto, diagrama, etc.).
+5. Prefira layout=bullets para a maioria do conteúdo; use outros layouts para variar.
+6. Não adicione nenhum texto fora dos blocos @@SLIDE … @@END.
+7. Retorne SOMENTE o DSL puro, sem explicações, sem blocos de código markdown.
+`.trim();
+
 /**
  * POST /api/slides
  * Requires authentication.
  * Body: { prompt: string, context: string, config?: NoteConfigApi, notesContext?: string, noteId?: string }
  * Response: { title: string, content: string }
+ *   content = raw SlideFramework DSL
  */
 app.post('/api/slides', requireAuth, structureLimiter, async (req: AuthRequest, res: Response) => {
   try {
@@ -763,26 +856,27 @@ app.post('/api/slides', requireAuth, structureLimiter, async (req: AuthRequest, 
       return;
     }
 
-    const detailInstructions: Record<string, string> = {
-      resumido: '3-4 slides concisos.',
-      normal: '5-7 slides equilibrados.',
-      detalhado: '8-12 slides detalhados.',
+    const slideCount: Record<string, string> = {
+      resumido: '3–4 slides (além do título e encerramento)',
+      normal: '5–7 slides (além do título e encerramento)',
+      detalhado: '8–12 slides (além do título e encerramento)',
     };
-    const detailInstruction = detailInstructions[config?.detailLevel ?? 'normal'];
+    const quantity = slideCount[config?.detailLevel ?? 'normal'];
 
     const notesSection = notesContext
-      ? `\n\nNOTAS DE REFERÊNCIA:\n${notesContext}\n\nUse essas notas como base para o conteúdo dos slides.`
+      ? `\n\nNOTAS DE REFERÊNCIA (use como base para o conteúdo):\n${notesContext}`
       : '';
 
-    const aiPrompt = `Crie uma estrutura de slides para uma apresentação.
+    const aiPrompt = `${SLIDE_FRAMEWORK_DOCS}
 
-CONTEXTO DA APRESENTAÇÃO: ${context}${notesSection}${prompt ? `\nINSTRUÇÕES ADICIONAIS: ${prompt}` : ''}
-QUANTIDADE: ${detailInstruction}
+---
 
-Cada slide deve ter título (heading), conteúdo (bullets ou texto) e notas do apresentador.
+Crie agora uma apresentação usando o SlideFramework DSL acima.
 
-Retorne SOMENTE JSON compacto:
-{"t":"título da apresentação","sl":[{"h":"título do slide","b":"conteúdo/bullets","n":"notas do apresentador"}]}`;
+CONTEXTO: ${context}${notesSection}${prompt ? `\nINSTRUÇÕES ADICIONAIS: ${prompt}` : ''}
+QUANTIDADE DE SLIDES DE CONTEÚDO: ${quantity}
+
+Lembre-se: retorne SOMENTE o DSL puro, começando diretamente com @@SLIDE layout=title.`;
 
     const response = await openai.chat.completions.create({
       model: 'gpt-5.4-nano-2026-03-17',
@@ -790,33 +884,21 @@ Retorne SOMENTE JSON compacto:
         { role: 'system', content: SYSTEM_PT_BR },
         { role: 'user', content: aiPrompt },
       ],
-      response_format: { type: 'json_object' },
       max_completion_tokens: 4096,
     });
 
-    const raw = JSON.parse(response.choices[0].message.content ?? '{}') as {
-      t?: unknown;
-      sl?: Array<{ h?: unknown; b?: unknown; n?: unknown }>;
-      title?: unknown;
-    };
-
     void trackTokenUsage(req.user!.sub, noteId ?? null, 'slides', response.usage);
 
-    const presentationTitle = typeof raw.t === 'string' ? raw.t : (typeof raw.title === 'string' ? raw.title : 'Apresentação');
-    const slides = Array.isArray(raw.sl) ? raw.sl : [];
+    let dsl = (response.choices[0].message.content ?? '').trim();
 
-    const markdownContent = slides
-      .map((slide) => {
-        const heading = typeof slide.h === 'string' ? slide.h : '';
-        const body = typeof slide.b === 'string' ? slide.b : '';
-        const notes = typeof slide.n === 'string' ? slide.n : '';
-        let md = `## ${heading}\n\n${body}`;
-        if (notes) md += `\n\n> ${notes}`;
-        return md;
-      })
-      .join('\n\n---\n\n');
+    // Strip markdown code fences if the model wrapped the output
+    dsl = dsl.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim();
 
-    res.json({ title: presentationTitle, content: `# ${presentationTitle}\n\n${markdownContent}` });
+    // Derive presentation title from the first @@TITLE directive
+    const titleMatch = dsl.match(/@@TITLE\s+(.+)/);
+    const title = titleMatch ? titleMatch[1].trim() : 'Apresentação';
+
+    res.json({ title, content: dsl });
   } catch (error) {
     console.error('Slides error:', error);
     res.status(500).json({ error: 'Failed to generate slides' });
