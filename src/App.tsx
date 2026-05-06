@@ -684,29 +684,23 @@ function App() {
                           Notas de referência <span className="text-muted-foreground font-normal">(opcional)</span>
                         </label>
                         <div className="max-h-36 overflow-y-auto space-y-1 border border-border rounded-md p-2">
-                          {notes.map((note) => (
+                          {notes.map((note) => {
+                            const toggleNote = () =>
+                              setSlidesNoteIds((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(note.id)) next.delete(note.id);
+                                else next.add(note.id);
+                                return next;
+                              });
+                            return (
                             <div
                               key={note.id}
                               className="flex items-center gap-2 px-1 py-0.5 rounded hover:bg-muted/50 cursor-pointer"
-                              onClick={() =>
-                                setSlidesNoteIds((prev) => {
-                                  const next = new Set(prev);
-                                  if (next.has(note.id)) next.delete(note.id);
-                                  else next.add(note.id);
-                                  return next;
-                                })
-                              }
+                              onClick={toggleNote}
                             >
                               <Checkbox
                                 checked={slidesNoteIds.has(note.id)}
-                                onCheckedChange={() =>
-                                  setSlidesNoteIds((prev) => {
-                                    const next = new Set(prev);
-                                    if (next.has(note.id)) next.delete(note.id);
-                                    else next.add(note.id);
-                                    return next;
-                                  })
-                                }
+                                onCheckedChange={toggleNote}
                                 className="pointer-events-none"
                               />
                               <span className="text-xs text-foreground truncate flex-1">{note.title}</span>
@@ -714,7 +708,8 @@ function App() {
                                 {NOTE_TYPE_LABELS[note.noteType] ?? note.noteType}
                               </Badge>
                             </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     )}
