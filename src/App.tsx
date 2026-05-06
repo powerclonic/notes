@@ -707,9 +707,11 @@ function App() {
                                 className="pointer-events-none"
                               />
                               <span className="text-xs text-foreground truncate flex-1">{note.title}</span>
-                              <Badge variant="secondary" className="text-[10px] px-1 py-0 shrink-0">
-                                {NOTE_TYPE_LABELS[note.noteType] ?? note.noteType}
-                              </Badge>
+                              {note.noteType && (
+                                <Badge variant="secondary" className="text-[10px] px-1 py-0 shrink-0">
+                                  {NOTE_TYPE_LABELS[note.noteType]}
+                                </Badge>
+                              )}
                             </div>
                             );
                           })}
