@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { processImageOcr, structureNote, generateNoteFromNotes, generateSlides, getNotes, saveNote, patchNote, removeNote } from '@/lib/api';
+import { processImageOcr, processImageOcrBatch, structureNote, generateNoteFromNotes, generateSlides, getNotes, saveNote, patchNote, removeNote } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { LoginPage } from '@/components/LoginPage';
 import { Button } from '@/components/ui/button';
@@ -36,6 +36,7 @@ import {
 } from './types';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
+import { compressToWebP, buildImageGrid, chunkArray, getGridLayout } from '@/lib/imageUtils';
 
 type AppView = 'home' | 'camera' | 'processing' | 'review' | 'edit';
 
@@ -118,14 +119,20 @@ function App() {
           reader.readAsDataURL(file);
         })
     );
-    Promise.all(readers).then((images) => {
-      setCurrentImages(images);
-      setCurrentView('processing');
-      processImages(images);
-    }).finally(() => {
-      // Reset after processing so users can retry with the same files if needed
-      event.target.value = '';
-    });
+    Promise.all(readers)
+      .then((rawImages) =>
+        // Compress uploaded images to WebP before processing
+        Promise.all(rawImages.map((img) => compressToWebP(img, 1280, 0.75)))
+      )
+      .then((images) => {
+        setCurrentImages(images);
+        setCurrentView('processing');
+        processImages(images);
+      })
+      .finally(() => {
+        // Reset after processing so users can retry with the same files if needed
+        event.target.value = '';
+      });
   };
 
   const processImages = async (images: string[]) => {
@@ -134,23 +141,48 @@ function App() {
       const allUncertainWords: UncertainWord[] = [];
       let textOffset = 0;
 
-      for (let i = 0; i < images.length; i++) {
-        setProcessingProgress({ current: i + 1, total: images.length });
-        const result = await processImageOcr(images[i], noteTheme || undefined);
+      // Split into groups of up to 4 images
+      const groups = chunkArray(images, 4);
 
-        if (result.fullText && result.fullText.trim() !== '') {
-          allTexts.push(result.fullText);
+      for (let g = 0; g < groups.length; g++) {
+        const group = groups[g];
+        // Report progress by group: "group X of Y (images A–B)"
+        setProcessingProgress({ current: g + 1, total: groups.length });
 
-          // Offset uncertain word indices for combined text
-          const offset = textOffset;
-          for (const w of result.uncertainWords || []) {
-            allUncertainWords.push({
-              ...w,
-              startIndex: w.startIndex + offset,
-              endIndex: w.endIndex + offset,
-            });
+        let groupResults: Array<{ fullText: string; uncertainWords: UncertainWord[]; imageType?: string }>;
+
+        if (group.length === 1) {
+          // Single image: use existing endpoint (preserves bboxes for visual review)
+          const result = await processImageOcr(group[0], noteTheme || undefined);
+          groupResults = [result];
+        } else {
+          // Multiple images: compose grid and call batch endpoint
+          const { cols, rows } = getGridLayout(group.length);
+          const gridData = await buildImageGrid(group, cols, rows, 640, 0.82);
+          const batchResult = await processImageOcrBatch(
+            gridData,
+            cols,
+            rows,
+            group.length,
+            noteTheme || undefined
+          );
+          groupResults = batchResult.images;
+        }
+
+        for (const result of groupResults) {
+          if (result.fullText && result.fullText.trim() !== '') {
+            allTexts.push(result.fullText);
+
+            // Offset uncertain word indices for combined text
+            for (const w of result.uncertainWords || []) {
+              allUncertainWords.push({
+                ...w,
+                startIndex: w.startIndex + textOffset,
+                endIndex: w.endIndex + textOffset,
+              });
+            }
+            textOffset += result.fullText.length + '\n\n---\n\n'.length;
           }
-        textOffset += result.fullText.length + '\n\n---\n\n'.length;
         }
       }
 

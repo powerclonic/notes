@@ -95,6 +95,24 @@ export function processImageOcr(imageData: string, theme?: string): Promise<OcrR
   return post<OcrResult>('/api/ocr', { imageData, theme });
 }
 
+export interface OcrBatchResult {
+  images: OcrResult[];
+}
+
+/**
+ * Extract text from a grid image that contains multiple images combined.
+ * The backend returns one OcrResult per image cell.
+ */
+export function processImageOcrBatch(
+  gridData: string,
+  cols: number,
+  rows: number,
+  imageCount: number,
+  theme?: string
+): Promise<OcrBatchResult> {
+  return post<OcrBatchResult>('/api/ocr/batch', { gridData, cols, rows, imageCount, theme });
+}
+
 /** Structure raw text into a titled, formatted note via the backend. */
 export function structureNote(
   text: string,

@@ -354,6 +354,118 @@ Responda SOMENTE com JSON compacto:
   }
 });
 
+/**
+ * POST /api/ocr/batch
+ * Requires authentication.
+ * Body: { gridData: string, cols: number, rows: number, imageCount: number, theme?: string }
+ *   gridData – base64 data-URL of a grid image composed of multiple images.
+ *   cols/rows – grid dimensions used to tell the model the layout.
+ *   imageCount – exact number of image cells present (≤ cols × rows).
+ *
+ * Single-pass: the model extracts text from each numbered section in one call.
+ * No bounding-box pass is performed for batches; uncertain words still carry
+ * suggestions but no visual highlight region.
+ *
+ * Response: { images: Array<{ fullText, uncertainWords, imageType }> }
+ */
+app.post('/api/ocr/batch', requireAuth, ocrLimiter, async (req: AuthRequest, res: Response) => {
+  try {
+    const { gridData, cols, rows, imageCount, theme } = req.body as {
+      gridData?: string;
+      cols?: number;
+      rows?: number;
+      imageCount?: number;
+      theme?: string;
+    };
+
+    if (!gridData) {
+      res.status(400).json({ error: 'gridData is required' });
+      return;
+    }
+    if (
+      typeof cols !== 'number' ||
+      typeof rows !== 'number' ||
+      typeof imageCount !== 'number' ||
+      imageCount < 2 ||
+      imageCount > cols * rows
+    ) {
+      res.status(400).json({ error: 'cols, rows and imageCount (2–cols×rows) are required' });
+      return;
+    }
+
+    const themeContext = theme ? `\nContexto/temática: ${theme}` : '';
+    const sectionNumbers = Array.from({ length: imageCount }, (_, i) => i + 1).join(', ');
+
+    const batchResponse = await openai.chat.completions.create({
+      model: 'gpt-5.4-nano-2026-03-17',
+      messages: [
+        { role: 'system', content: SYSTEM_PT_BR },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: `Você é um especialista em OCR. Esta imagem é uma grade ${cols}×${rows} contendo ${imageCount} seções numeradas (${sectionNumbers}), da esquerda para a direita, de cima para baixo. Cada seção tem seu número no canto superior esquerdo.${themeContext}
+
+Para CADA seção, faça:
+1. Classifique como "slide", "hw" ou "print".
+2. Extraia todo o texto visível.
+   - "slide": transcreva exatamente como aparece.
+   - "hw": interprete holisticamente — setas, seções, estrutura espacial.${theme ? ` Use o contexto "${theme}".` : ''}
+   - "print": transcreva fielmente.
+3. Marque palavras incertas com até 3 sugestões.
+
+Regras:
+- s/e devem coincidir exatamente com a fatia de ft onde a palavra aparece, por seção.
+- Se não houver palavras incertas, retorne uw como array vazio.
+- Se uma seção não tiver texto, retorne ft vazio e uw vazio.
+- Responda SOMENTE com JSON compacto, sem markdown:
+{"sections":[{"n":1,"ft":"texto","tp":"slide|hw|print","uw":[{"w":"palavra","s":<start>,"e":<end>,"sg":["alt1"]}]},…]}`,
+            },
+            { type: 'image_url', image_url: { url: gridData, detail: 'high' } },
+          ],
+        },
+      ],
+      response_format: { type: 'json_object' },
+      max_completion_tokens: 8192,
+    });
+
+    const batchRaw = JSON.parse(batchResponse.choices[0].message.content ?? '{}') as {
+      sections?: Array<{
+        n?: unknown;
+        ft?: unknown;
+        tp?: unknown;
+        uw?: Array<{ w?: unknown; s?: unknown; e?: unknown; sg?: unknown }>;
+      }>;
+    };
+
+    const sections = Array.isArray(batchRaw.sections) ? batchRaw.sections : [];
+
+    // Build one OcrResult per image cell (sections are 1-based)
+    const images = Array.from({ length: imageCount }, (_, idx) => {
+      const section = sections.find((s) => s.n === idx + 1) ?? {};
+      const fullText: string = typeof section.ft === 'string' ? section.ft : '';
+      const imageType: string = typeof section.tp === 'string' ? section.tp : 'print';
+      const uncertainWords: UncertainWordRaw[] = Array.isArray(section.uw)
+        ? section.uw
+            .map((entry) => ({
+              word: typeof entry.w === 'string' ? entry.w : '',
+              startIndex: typeof entry.s === 'number' ? entry.s : 0,
+              endIndex: typeof entry.e === 'number' ? entry.e : 0,
+              suggestions: Array.isArray(entry.sg) ? (entry.sg as string[]) : undefined,
+            }))
+            .filter((w) => w.word.trim() !== '')
+        : [];
+      return { fullText, uncertainWords, imageType };
+    });
+
+    res.json({ images });
+  } catch (error) {
+    console.error('OCR batch error:', error);
+    res.status(500).json({ error: 'Failed to process image batch' });
+  }
+});
+
 const NOTE_TYPE_INSTRUCTIONS: Record<string, string> = {
   'mapa-mental': `Formate como um mapa mental em Markdown:
 - Use títulos (##) para os nós principais
