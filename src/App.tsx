@@ -249,7 +249,9 @@ function App() {
         updatedAt: now,
       };
 
-      saveNote({ ...newNote, noteType: newNote.noteType }).catch(() => {});
+      saveNote({ ...newNote, noteType: newNote.noteType }).catch((err) => {
+        console.error('Failed to persist fallback note:', err);
+      });
       setNotes((prev) => [newNote, ...prev]);
       setCurrentView('home');
       setNoteToUpdate(null);

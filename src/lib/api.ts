@@ -90,7 +90,7 @@ async function put<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-
+/** Extract text from a base64 data-URL image using the backend OCR endpoint. */
 export function processImageOcr(imageData: string, theme?: string): Promise<OcrResult> {
   return post<OcrResult>('/api/ocr', { imageData, theme });
 }

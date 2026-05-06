@@ -74,10 +74,22 @@ export async function updateNote(
   const setClauses: string[] = ['updated_at = ?'];
   const values: (string | number | null)[] = [updatedAt];
 
-  if (fields.title !== undefined) { setClauses.push('title = ?'); values.push(fields.title); }
-  if (fields.content !== undefined) { setClauses.push('content = ?'); values.push(fields.content); }
-  if ('noteType' in fields) { setClauses.push('note_type = ?'); values.push(fields.noteType ?? null); }
-  if ('originalImage' in fields) { setClauses.push('original_image = ?'); values.push(fields.originalImage ?? null); }
+  if (fields.title !== undefined) {
+    setClauses.push('title = ?');
+    values.push(fields.title);
+  }
+  if (fields.content !== undefined) {
+    setClauses.push('content = ?');
+    values.push(fields.content);
+  }
+  if ('noteType' in fields) {
+    setClauses.push('note_type = ?');
+    values.push(fields.noteType ?? null);
+  }
+  if ('originalImage' in fields) {
+    setClauses.push('original_image = ?');
+    values.push(fields.originalImage ?? null);
+  }
   if ('originalImages' in fields) {
     setClauses.push('original_images = ?');
     values.push(fields.originalImages ? JSON.stringify(fields.originalImages) : null);
