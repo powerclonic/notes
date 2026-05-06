@@ -187,7 +187,7 @@ function App() {
       } else {
         const newNote: Note = {
           id: crypto.randomUUID(),
-          content: result.content || text,
+          title: result.title || 'Nota sem título',
           noteType: selectedNoteType,
           originalImage: currentImages[0] || undefined,
           originalImages: currentImages.length > 0 ? currentImages : undefined,
@@ -210,6 +210,7 @@ function App() {
 
       const newNote: Note = {
         id: crypto.randomUUID(),
+        title: 'Nota sem título',
         content: text,
         noteType: selectedNoteType,
         originalImage: currentImages[0] || undefined,
