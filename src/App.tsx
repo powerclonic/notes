@@ -1,12 +1,14 @@
 import { useState, useRef } from 'react';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
-import { processImageOcr, structureNote } from '@/lib/api';
+import { processImageOcr, structureNote, generateNoteFromNotes, generateSlides } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { LoginPage } from '@/components/LoginPage';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
@@ -55,7 +57,8 @@ function App() {
   const notesKey = user ? `notes_${user.id}` : 'notes';
   const [notes = [], setNotes] = useLocalStorage<Note[]>(notesKey, []);
   const [currentView, setCurrentView] = useState<AppView>('home');
-  const [currentImage, setCurrentImage] = useState<string | null>(null);
+  const [currentImages, setCurrentImages] = useState<string[]>([]);
+  const [processingProgress, setProcessingProgress] = useState<{ current: number; total: number } | null>(null);
   const [extractedText, setExtractedText] = useState<string>('');
   const [uncertainWords, setUncertainWords] = useState<UncertainWord[]>([]);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
@@ -63,50 +66,90 @@ function App() {
   const [selectedNoteType, setSelectedNoteType] = useState<NoteType>('anotacoes');
   const [noteToUpdate, setNoteToUpdate] = useState<Note | null>(null);
   const [noteConfig, setNoteConfig] = useState<NoteConfig>(DEFAULT_NOTE_CONFIG);
+  const [noteTheme, setNoteTheme] = useState<string>('');
+  const [showSlidesForm, setShowSlidesForm] = useState(false);
+  const [slidesPrompt, setSlidesPrompt] = useState('');
+  const [slidesContext, setSlidesContext] = useState('');
+  const [slidesContextError, setSlidesContextError] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleImageCapture = (imageData: string) => {
-    setCurrentImage(imageData);
+  const handleImageCapture = (imageData: string | string[]) => {
+    const images = Array.isArray(imageData) ? imageData : [imageData];
+    setCurrentImages(images);
     setCurrentView('processing');
-    processImage(imageData);
+    processImages(images);
   };
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const imageData = e.target?.result as string;
-        setCurrentImage(imageData);
-        setCurrentView('processing');
-        processImage(imageData);
-      };
-      reader.readAsDataURL(file);
-    }
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+    const fileList = Array.from(files);
+    const readers = fileList.map(
+      (file) =>
+        new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target?.result as string);
+          reader.readAsDataURL(file);
+        })
+    );
+    Promise.all(readers).then((images) => {
+      setCurrentImages(images);
+      setCurrentView('processing');
+      processImages(images);
+    }).finally(() => {
+      // Reset after processing so users can retry with the same files if needed
+      event.target.value = '';
+    });
   };
 
-  const processImage = async (imageData: string) => {
+  const processImages = async (images: string[]) => {
     try {
-      const result = await processImageOcr(imageData);
+      const allTexts: string[] = [];
+      const allUncertainWords: UncertainWord[] = [];
+      let textOffset = 0;
 
-      if (!result.fullText || result.fullText.trim() === '') {
-        toast.error('Nenhum texto foi detectado na imagem. Tente outra foto.');
+      for (let i = 0; i < images.length; i++) {
+        setProcessingProgress({ current: i + 1, total: images.length });
+        const result = await processImageOcr(images[i], noteTheme || undefined);
+
+        if (result.fullText && result.fullText.trim() !== '') {
+          allTexts.push(result.fullText);
+
+          // Offset uncertain word indices for combined text
+          const offset = textOffset;
+          for (const w of result.uncertainWords || []) {
+            allUncertainWords.push({
+              ...w,
+              startIndex: w.startIndex + offset,
+              endIndex: w.endIndex + offset,
+            });
+          }
+        textOffset += result.fullText.length + '\n\n---\n\n'.length;
+        }
+      }
+
+      setProcessingProgress(null);
+
+      if (allTexts.length === 0) {
+        toast.error('Nenhum texto foi detectado nas imagens. Tente outras fotos.');
         setCurrentView('home');
         return;
       }
 
-      setExtractedText(result.fullText);
-      setUncertainWords(result.uncertainWords || []);
+      const combinedText = allTexts.join('\n\n---\n\n');
+      setExtractedText(combinedText);
+      setUncertainWords(allUncertainWords);
 
-      if (result.uncertainWords && result.uncertainWords.length > 0) {
+      if (allUncertainWords.length > 0) {
         setCurrentView('review');
-        toast.info(`${result.uncertainWords.length} palavras precisam de revisão.`);
+        toast.info(`${allUncertainWords.length} palavras precisam de revisão.`);
       } else {
-        structureAndSaveNote(result.fullText);
+        structureAndSaveNote(combinedText);
       }
     } catch (error) {
       toast.error('Erro ao processar imagem. Tente novamente.');
       console.error(error);
+      setProcessingProgress(null);
       setCurrentView('home');
     }
   };
@@ -122,7 +165,7 @@ function App() {
         ? { title: noteToUpdate.title, content: noteToUpdate.content }
         : undefined;
 
-      const result = await structureNote(text, selectedNoteType, existingNotePayload, noteConfig);
+      const result = await structureNote(text, selectedNoteType, existingNotePayload, noteConfig, noteTheme || undefined);
 
       if (noteToUpdate) {
         const updatedNote: Note = {
@@ -130,7 +173,8 @@ function App() {
           title: result.title || noteToUpdate.title,
           content: result.content || text,
           noteType: selectedNoteType,
-          originalImage: currentImage || noteToUpdate.originalImage,
+          originalImage: currentImages[0] || noteToUpdate.originalImage,
+          originalImages: currentImages.length > 0 ? currentImages : noteToUpdate.originalImages,
           updatedAt: Date.now(),
         };
         setNotes((currentNotes = []) =>
@@ -143,7 +187,8 @@ function App() {
           title: result.title || 'Nota sem título',
           content: result.content || text,
           noteType: selectedNoteType,
-          originalImage: currentImage || undefined,
+          originalImage: currentImages[0] || undefined,
+          originalImages: currentImages.length > 0 ? currentImages : undefined,
           createdAt: Date.now(),
           updatedAt: Date.now(),
         };
@@ -152,10 +197,11 @@ function App() {
       }
 
       setCurrentView('home');
-      setCurrentImage(null);
+      setCurrentImages([]);
       setExtractedText('');
       setUncertainWords([]);
       setNoteToUpdate(null);
+      setNoteTheme('');
       setActiveTab('library');
     } catch (error) {
       toast.error('Erro ao estruturar nota. Salvando texto bruto...');
@@ -165,7 +211,8 @@ function App() {
         title: 'Nota sem título',
         content: text,
         noteType: selectedNoteType,
-        originalImage: currentImage || undefined,
+        originalImage: currentImages[0] || undefined,
+        originalImages: currentImages.length > 0 ? currentImages : undefined,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
@@ -173,6 +220,7 @@ function App() {
       setNotes((currentNotes) => [newNote, ...currentNotes]);
       setCurrentView('home');
       setNoteToUpdate(null);
+      setNoteTheme('');
       setActiveTab('library');
     }
   };
@@ -227,6 +275,69 @@ function App() {
     }
   };
 
+  const handleGenerateFromNotes = async (noteIds: string[], prompt: string) => {
+    const sourceNotes = notes.filter((n) => noteIds.includes(n.id));
+    if (sourceNotes.length === 0) return;
+
+    const genNoteType = sourceNotes[0].noteType ?? selectedNoteType;
+
+    try {
+      setCurrentView('processing');
+      const result = await generateNoteFromNotes(
+        sourceNotes.map((n) => ({ title: n.title, content: n.content })),
+        prompt,
+        genNoteType,
+        noteConfig
+      );
+      const newNote: Note = {
+        id: crypto.randomUUID(),
+        title: result.title || 'Nota gerada',
+        content: result.content || '',
+        noteType: genNoteType,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      setNotes((currentNotes = []) => [newNote, ...currentNotes]);
+      toast.success('Nota gerada com sucesso!', { description: newNote.title });
+    } catch {
+      toast.error('Erro ao gerar nota. Tente novamente.');
+    } finally {
+      setCurrentView('home');
+      setActiveTab('library');
+    }
+  };
+
+  const handleGenerateSlides = async () => {
+    if (!slidesContext.trim()) {
+      setSlidesContextError(true);
+      return;
+    }
+    if (!slidesPrompt.trim()) return;
+
+    try {
+      setCurrentView('processing');
+      const result = await generateSlides(slidesPrompt, slidesContext, noteConfig);
+      const newNote: Note = {
+        id: crypto.randomUUID(),
+        title: result.title || 'Slides',
+        content: result.content || '',
+        noteType: 'slides',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      setNotes((currentNotes = []) => [newNote, ...currentNotes]);
+      toast.success('Slides gerados com sucesso!', { description: newNote.title });
+      setSlidesPrompt('');
+      setSlidesContext('');
+      setShowSlidesForm(false);
+      setActiveTab('library');
+    } catch {
+      toast.error('Erro ao gerar slides. Tente novamente.');
+    } finally {
+      setCurrentView('home');
+    }
+  };
+
 
   if (isLoading) {
     return (
@@ -268,7 +379,9 @@ function App() {
             <div className="text-center space-y-1.5">
               <h3 className="text-lg font-semibold">Processando...</h3>
               <p className="text-sm text-muted-foreground">
-                A IA está organizando sua nota
+                {processingProgress && processingProgress.total > 1
+                  ? `Processando ${processingProgress.current} de ${processingProgress.total} imagens...`
+                  : 'A IA está organizando sua nota'}
               </p>
             </div>
           </CardContent>
@@ -284,7 +397,7 @@ function App() {
           <WordReviewInterface
             text={extractedText}
             uncertainWords={uncertainWords}
-            imageData={currentImage}
+            imageData={currentImages[0] ?? null}
             onComplete={handleReviewComplete}
           />
         </div>
@@ -516,10 +629,86 @@ function App() {
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
+                multiple
                 onChange={handleFileUpload}
                 className="hidden"
               />
             </div>
+
+            {/* Nota theme input */}
+            <div>
+              <label className="text-sm font-medium text-foreground block mb-1.5">
+                Temática da nota{' '}
+                <span className="text-muted-foreground font-normal">(opcional)</span>
+              </label>
+              <Input
+                value={noteTheme}
+                onChange={(e) => setNoteTheme(e.target.value)}
+                placeholder="Ex: Química orgânica, Reunião de vendas..."
+                className="text-sm"
+              />
+            </div>
+
+            {/* Slide mode */}
+            <Card>
+              <CardContent className="pt-4 pb-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">🎞️ Modo Slide</p>
+                    <p className="text-xs text-muted-foreground">Gere uma estrutura de slides com IA</p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant={showSlidesForm ? 'secondary' : 'outline'}
+                    onClick={() => setShowSlidesForm((v) => !v)}
+                    className="gap-1.5 h-8"
+                  >
+                    <Sparkle className="w-3.5 h-3.5" />
+                    Criar Slides
+                  </Button>
+                </div>
+                {showSlidesForm && (
+                  <div className="space-y-3 mt-3 border-t border-border pt-3">
+                    <div>
+                      <label className="text-xs font-medium text-muted-foreground block mb-1">
+                        Contexto da apresentação <span className="text-destructive">*</span>
+                      </label>
+                      <Textarea
+                        value={slidesContext}
+                        onChange={(e) => {
+                          setSlidesContext(e.target.value);
+                          if (e.target.value.trim()) setSlidesContextError(false);
+                        }}
+                        placeholder="Ex: Aula de química para o ensino médio"
+                        className={`text-sm min-h-[56px] resize-none ${slidesContextError ? 'border-destructive' : ''}`}
+                      />
+                      {slidesContextError && (
+                        <p className="text-xs text-destructive mt-1">O contexto da apresentação é obrigatório.</p>
+                      )}
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-muted-foreground block mb-1">
+                        Prompt / conteúdo dos slides
+                      </label>
+                      <Textarea
+                        value={slidesPrompt}
+                        onChange={(e) => setSlidesPrompt(e.target.value)}
+                        placeholder="Descreva o conteúdo ou tópicos que devem aparecer nos slides..."
+                        className="text-sm min-h-[80px] resize-none"
+                      />
+                    </div>
+                    <Button
+                      onClick={handleGenerateSlides}
+                      disabled={!slidesPrompt.trim()}
+                      className="w-full gap-1.5"
+                    >
+                      <Sparkle className="w-4 h-4" />
+                      Gerar Slides
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
 
             {/* Tips */}
             <div className="px-3 py-2.5 bg-muted/60 rounded-lg">
@@ -528,6 +717,7 @@ function App() {
                 <li>• Use boa iluminação e enquadre todo o texto</li>
                 <li>• Mantenha a câmera estável</li>
                 <li>• Evite sombras e reflexos</li>
+                <li>• Selecione múltiplas imagens para uma única nota</li>
               </ul>
             </div>
           </TabsContent>
@@ -538,6 +728,7 @@ function App() {
               onEdit={handleEditNote}
               onDelete={handleDeleteNote}
               onMerge={handleMergeNotes}
+              onGenerate={handleGenerateFromNotes}
             />
           </TabsContent>
         </Tabs>

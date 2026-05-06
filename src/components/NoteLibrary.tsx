@@ -2,7 +2,8 @@ import { Note, NOTE_TYPE_LABELS, NOTE_TYPE_ICONS, NoteType } from '@/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Trash, PencilSimple, Image, CheckSquare, Square, GitMerge, X } from '@phosphor-icons/react';
+import { Textarea } from '@/components/ui/textarea';
+import { Trash, PencilSimple, Image, CheckSquare, Square, GitMerge, X, Sparkle } from '@phosphor-icons/react';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -24,15 +25,18 @@ interface NoteLibraryProps {
   onEdit: (note: Note) => void;
   onDelete: (noteId: string) => void;
   onMerge: (noteIds: string[]) => void;
+  onGenerate: (noteIds: string[], prompt: string) => void;
 }
 
 const isValidNoteType = (type: unknown): type is NoteType =>
   typeof type === 'string' && type in NOTE_TYPE_LABELS;
 
-export function NoteLibrary({ notes, onEdit, onDelete, onMerge }: NoteLibraryProps) {
+export function NoteLibrary({ notes, onEdit, onDelete, onMerge, onGenerate }: NoteLibraryProps) {
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [showGeneratePrompt, setShowGeneratePrompt] = useState(false);
+  const [generatePrompt, setGeneratePrompt] = useState('');
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
@@ -46,10 +50,22 @@ export function NoteLibrary({ notes, onEdit, onDelete, onMerge }: NoteLibraryPro
   const exitSelectMode = () => {
     setSelectMode(false);
     setSelected(new Set());
+    setShowGeneratePrompt(false);
+    setGeneratePrompt('');
   };
 
   const handleMerge = () => {
     onMerge(Array.from(selected));
+    exitSelectMode();
+  };
+
+  const handleGenerateClick = () => {
+    setShowGeneratePrompt(true);
+  };
+
+  const handleGenerateConfirm = () => {
+    if (!generatePrompt.trim()) return;
+    onGenerate(Array.from(selected), generatePrompt.trim());
     exitSelectMode();
   };
 
@@ -73,17 +89,24 @@ export function NoteLibrary({ notes, onEdit, onDelete, onMerge }: NoteLibraryPro
     <>
       <div className="flex flex-col h-full gap-2">
         {/* Toolbar */}
-        <div className="flex items-center justify-between px-1 shrink-0">
+        <div className="flex flex-col gap-2 px-1 shrink-0">
+          <div className="flex items-center justify-between">
           {selectMode ? (
             <>
               <span className="text-sm text-muted-foreground">
                 {selected.size} selecionada{selected.size !== 1 ? 's' : ''}
               </span>
               <div className="flex gap-2">
-                {selected.size >= 2 && (
+                {selected.size >= 2 && !showGeneratePrompt && (
                   <Button size="sm" onClick={handleMerge} className="gap-1.5 h-8">
                     <GitMerge className="w-3.5 h-3.5" />
                     Juntar
+                  </Button>
+                )}
+                {selected.size >= 1 && !showGeneratePrompt && (
+                  <Button size="sm" variant="outline" onClick={handleGenerateClick} className="gap-1.5 h-8">
+                    <Sparkle className="w-3.5 h-3.5" />
+                    Gerar
                   </Button>
                 )}
                 <Button size="sm" variant="ghost" onClick={exitSelectMode} className="gap-1.5 h-8">
@@ -107,6 +130,28 @@ export function NoteLibrary({ notes, onEdit, onDelete, onMerge }: NoteLibraryPro
                 Selecionar
               </Button>
             </>
+          )}
+          </div>
+          {showGeneratePrompt && (
+            <div className="flex flex-col gap-2 p-2 border border-border rounded-lg bg-muted/30">
+              <p className="text-xs font-medium text-muted-foreground">Instrução para gerar nota:</p>
+              <Textarea
+                value={generatePrompt}
+                onChange={(e) => setGeneratePrompt(e.target.value)}
+                placeholder="Ex: Crie um resumo comparativo das notas selecionadas..."
+                className="text-sm min-h-[64px] resize-none"
+                autoFocus
+              />
+              <div className="flex gap-2 justify-end">
+                <Button size="sm" variant="ghost" onClick={() => setShowGeneratePrompt(false)} className="h-7">
+                  Voltar
+                </Button>
+                <Button size="sm" onClick={handleGenerateConfirm} disabled={!generatePrompt.trim()} className="h-7 gap-1.5">
+                  <Sparkle className="w-3.5 h-3.5" />
+                  Gerar
+                </Button>
+              </div>
+            </div>
           )}
         </div>
 
@@ -189,12 +234,21 @@ export function NoteLibrary({ notes, onEdit, onDelete, onMerge }: NoteLibraryPro
                     <div className="text-sm text-muted-foreground line-clamp-3 leading-relaxed">
                       <MarkdownRenderer content={note.content} className="markdown-preview" />
                     </div>
-                    {note.originalImage && (
+                    {(note.originalImages && note.originalImages.length > 0) ? (
+                      <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <Image className="w-3 h-3" weight="fill" />
+                        <span>
+                          {note.originalImages.length > 1
+                            ? `${note.originalImages.length} imagens originais`
+                            : 'Imagem original anexada'}
+                        </span>
+                      </div>
+                    ) : note.originalImage ? (
                       <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
                         <Image className="w-3 h-3" weight="fill" />
                         <span>Imagem original anexada</span>
                       </div>
-                    )}
+                    ) : null}
                   </CardContent>
                 </Card>
               );

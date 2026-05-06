@@ -35,8 +35,7 @@ app.use(express.json({ limit: '50mb' }));
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const SYSTEM_PT_BR =
-  'Você é um assistente especializado. Responda SEMPRE em português brasileiro (pt-BR), sem exceções.';
+const SYSTEM_PT_BR = 'Responda em pt-BR.';
 
 // ---------------------------------------------------------------------------
 // Rate limiters
@@ -182,69 +181,76 @@ app.get('/api/auth/me', requireAuth, (req: AuthRequest, res: Response) => {
   res.json({ id: user.id, email: user.email });
 });
 
+interface UncertainWordRaw {
+  word: string;
+  startIndex: number;
+  endIndex: number;
+  suggestions?: string[];
+  imageBbox?: {
+    xPercent: number;
+    yPercent: number;
+    widthPercent: number;
+    heightPercent: number;
+  };
+}
+
 /**
  * POST /api/ocr
  * Requires authentication.
- * Body: { imageData: string }  – base64 data-URL (e.g. data:image/jpeg;base64,...)
- * Response: { fullText: string, uncertainWords: UncertainWord[] }
+ * Body: { imageData: string, theme?: string }  – base64 data-URL (e.g. data:image/jpeg;base64,...)
+ * Response: { fullText: string, uncertainWords: UncertainWord[], imageType: string }
+ *
+ * Uses a two-pass approach:
+ *   Pass 1 – extract text, detect image type, and identify uncertain words (no coordinates).
+ *   Pass 2 – given the same image and the list of uncertain words, locate
+ *            each one precisely and return accurate bounding boxes.
+ * Separating the concerns prevents the model from randomly guessing
+ * coordinates while it is busy reading text.
  */
 app.post('/api/ocr', requireAuth, ocrLimiter, async (req: AuthRequest, res: Response) => {
   try {
-    const { imageData } = req.body as { imageData?: string };
+    const { imageData, theme } = req.body as { imageData?: string; theme?: string };
     if (!imageData) {
       res.status(400).json({ error: 'imageData is required' });
       return;
     }
 
-    const response = await openai.chat.completions.create({
+    // ------------------------------------------------------------------
+    // Pass 1: text extraction + image type detection + uncertain-word identification (no bboxes)
+    // Compact keys: ft=fullText, tp=imageType, uw=uncertainWords, w=word, s=startIndex, e=endIndex, sg=suggestions
+    // ------------------------------------------------------------------
+    const themeContext = theme ? `\nContexto/temática: ${theme}` : '';
+    const pass1Response = await openai.chat.completions.create({
       model: 'gpt-5.4-nano-2026-03-17',
       messages: [
-        {
-          role: 'system',
-          content: SYSTEM_PT_BR,
-        },
+        { role: 'system', content: SYSTEM_PT_BR },
         {
           role: 'user',
           content: [
             {
               type: 'text',
-              text: `You are an OCR expert specialized in reading handwritten notes and slide images.
+              text: `Você é um especialista em OCR. Analise esta imagem e extraia todo o texto visível.${themeContext}
 
-Analyze this image and extract ALL text visible in it. This could be handwritten notes, typed text on slides, or any other text.
+Primeiro, classifique a imagem como:
+- "slide": slide/apresentação projetada
+- "hw": manuscrito/esboço/anotação à mão
+- "print": texto impresso/digitado
 
-For each word you are uncertain about (due to poor handwriting, image quality, etc.), mark it as uncertain and include its approximate position in the image as percentage coordinates so the user can find it visually.
+Para tipo "slide": transcreva o texto exatamente como aparece, sem interpretar.
+Para tipo "hw": interprete holisticamente — leia setas, seções, itens circulados, marcadores de importância, estrutura espacial.${theme ? ` Use o contexto "${theme}" para melhorar a interpretação.` : ''}
+Para tipo "print": transcreva fielmente.
 
-Return your response as a JSON object with this exact structure:
-{
-  "fullText": "the complete extracted text with all words in order",
-  "uncertainWords": [
-    {
-      "word": "the word you're uncertain about (as you read it from the image)",
-      "startIndex": <number: character position where word starts in fullText>,
-      "endIndex": <number: character position where word ends in fullText>,
-      "suggestions": ["alternative1", "alternative2"],
-      "imageBbox": {
-        "xPercent": <number 0-100: left edge of the word in the image>,
-        "yPercent": <number 0-100: top edge of the word in the image>,
-        "widthPercent": <number 0-100: width of the word bounding box>,
-        "heightPercent": <number 0-100: height of the word bounding box>
-      }
-    }
-  ]
-}
+Para cada palavra com baixa confiança (caligrafia ruim, baixo contraste, ambiguidade), marque como incerta com até 3 sugestões.
 
-Important guidelines:
-- Extract ALL text you can see, maintaining original structure (paragraphs, bullet points, etc.)
-- Be honest about uncertainty – mark words you're not confident about
-- For handwritten text, be more cautious about certainty
-- Include proper line breaks to maintain text structure
-- Provide bounding boxes as percentages relative to full image dimensions (0-100). Add a small margin around the word so the user can see it clearly in context
-- If you see no text, return empty fullText and empty uncertainWords array`,
+Responda SOMENTE com JSON compacto:
+{"ft":"texto completo","tp":"slide|hw|print","uw":[{"w":"palavra","s":<startIndex>,"e":<endIndex>,"sg":["alt1","alt2"]}]}
+
+Regras:
+- s/e devem coincidir exatamente com a fatia de ft onde a palavra aparece.
+- Se não houver palavras incertas, retorne uw como array vazio.
+- Se não houver texto, retorne ft vazio e uw vazio.`,
             },
-            {
-              type: 'image_url',
-              image_url: { url: imageData, detail: 'high' },
-            },
+            { type: 'image_url', image_url: { url: imageData, detail: 'high' } },
           ],
         },
       ],
@@ -252,8 +258,94 @@ Important guidelines:
       max_completion_tokens: 4096,
     });
 
-    const result = JSON.parse(response.choices[0].message.content ?? '{}');
-    res.json(result);
+    const pass1Raw = JSON.parse(pass1Response.choices[0].message.content ?? '{}') as {
+      ft?: unknown;
+      tp?: unknown;
+      uw?: Array<{ w?: unknown; s?: unknown; e?: unknown; sg?: unknown }>;
+    };
+
+    // Decode compact keys with guardrails
+    const fullText: string = typeof pass1Raw.ft === 'string' ? pass1Raw.ft : '';
+    const imageType: string = typeof pass1Raw.tp === 'string' ? pass1Raw.tp : 'print';
+    const uncertainWords: UncertainWordRaw[] = Array.isArray(pass1Raw.uw)
+      ? pass1Raw.uw.map((entry) => ({
+          word: typeof entry.w === 'string' ? entry.w : '',
+          startIndex: typeof entry.s === 'number' ? entry.s : 0,
+          endIndex: typeof entry.e === 'number' ? entry.e : 0,
+          suggestions: Array.isArray(entry.sg) ? (entry.sg as string[]) : undefined,
+        })).filter((w) => w.word.trim() !== '')
+      : [];
+
+    // ------------------------------------------------------------------
+    // Pass 2: locate each uncertain word in the image (bboxes only)
+    // Compact keys: bx=bboxes, i=index, x=xPercent, y=yPercent, w=widthPercent, h=heightPercent
+    // Only performed when there are uncertain words to avoid extra cost.
+    // ------------------------------------------------------------------
+    if (uncertainWords.length > 0) {
+      const wordList = uncertainWords
+        .map((w, i) => {
+          const contextStart = Math.max(0, w.startIndex - 30);
+          const contextEnd = Math.min(fullText.length, w.endIndex + 30);
+          const before = fullText.slice(contextStart, w.startIndex);
+          const after = fullText.slice(w.endIndex, contextEnd);
+          return `${i + 1}. word="${w.word}" context="...${before}[${w.word}]${after}..."`;
+        })
+        .join('\n');
+
+      const pass2Response = await openai.chat.completions.create({
+        model: 'gpt-5.4-nano-2026-03-17',
+        messages: [
+          { role: 'system', content: SYSTEM_PT_BR },
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: `Mesma imagem do OCR. Localize cada palavra abaixo e retorne seu bounding box como percentagem (0-100) da imagem.
+
+Palavras:
+${wordList}
+
+- x,y = canto superior esquerdo; w,h = dimensões da caixa
+- Se não encontrar uma palavra, omita-a
+
+Responda SOMENTE com JSON compacto:
+{"bx":[{"i":<índice 1-based>,"x":<num>,"y":<num>,"w":<num>,"h":<num>}]}`,
+              },
+              { type: 'image_url', image_url: { url: imageData, detail: 'high' } },
+            ],
+          },
+        ],
+        response_format: { type: 'json_object' },
+        max_completion_tokens: 1024,
+      });
+
+      const pass2Raw = JSON.parse(pass2Response.choices[0].message.content ?? '{}') as {
+        bx?: Array<{ i?: unknown; x?: unknown; y?: unknown; w?: unknown; h?: unknown }>;
+      };
+
+      // Decode compact keys and merge bboxes back into uncertain words (1-based index)
+      for (const entry of Array.isArray(pass2Raw.bx) ? pass2Raw.bx : []) {
+        const idx = typeof entry.i === 'number' ? entry.i : 0;
+        const word = uncertainWords[idx - 1];
+        if (
+          word &&
+          typeof entry.x === 'number' &&
+          typeof entry.y === 'number' &&
+          typeof entry.w === 'number' &&
+          typeof entry.h === 'number'
+        ) {
+          word.imageBbox = {
+            xPercent: entry.x,
+            yPercent: entry.y,
+            widthPercent: entry.w,
+            heightPercent: entry.h,
+          };
+        }
+      }
+    }
+
+    res.json({ fullText, uncertainWords, imageType });
   } catch (error) {
     console.error('OCR error:', error);
     res.status(500).json({ error: 'Failed to process image' });
@@ -288,15 +380,16 @@ const DEFAULT_NOTE_INSTRUCTION = NOTE_TYPE_INSTRUCTIONS['anotacoes'];
 /**
  * POST /api/structure
  * Requires authentication.
- * Body: { text: string, noteType?: string, existingNote?: { title: string, content: string } }
+ * Body: { text: string, noteType?: string, existingNote?: { title: string, content: string }, theme?: string }
  * Response: { title: string, content: string }
  */
 app.post('/api/structure', requireAuth, structureLimiter, async (req: AuthRequest, res: Response) => {
   try {
-    const { text, noteType, existingNote, config } = req.body as {
+    const { text, noteType, existingNote, config, theme } = req.body as {
       text?: string;
       noteType?: string;
       existingNote?: { title: string; content: string };
+      theme?: string;
       config?: {
         detailLevel?: 'resumido' | 'normal' | 'detalhado';
         tone?: 'formal' | 'neutro' | 'casual';
@@ -331,80 +424,231 @@ app.post('/api/structure', requireAuth, structureLimiter, async (req: AuthReques
     const examplesInstruction = config?.includeExamples
       ? 'Quando relevante, adicione exemplos práticos para ilustrar os conceitos.'
       : 'Não adicione exemplos; mantenha o foco no conteúdo principal.';
+    const themeContext = theme ? `\nTemática/contexto: ${theme}` : '';
 
     let prompt: string;
 
     if (existingNote) {
-      prompt = `Você é um especialista em organização de notas. Sua tarefa é ATUALIZAR uma nota existente incorporando novo conteúdo extraído.
+      prompt = `Você é um especialista em organização de notas. Atualize a nota existente incorporando o novo conteúdo.${themeContext}
 
 NOTA EXISTENTE:
 Título: ${existingNote.title}
 Conteúdo:
 ${existingNote.content}
 
-NOVO CONTEÚDO EXTRAÍDO:
+NOVO CONTEÚDO:
 ${text}
 
 INSTRUÇÕES:
-1. Mescle o novo conteúdo com a nota existente de forma coesa
-2. Elimine redundâncias, mantendo informações únicas de ambos
-3. Corrija erros gramaticais e ortográficos
-4. ${typeInstruction}
-5. ${detailInstruction}
-6. ${toneInstruction}
-7. ${examplesInstruction}
-8. Gere um título conciso e descritivo (máximo 60 caracteres)
-9. Responda SEMPRE em português brasileiro
+1. Mescle o novo conteúdo de forma coesa, eliminando redundâncias
+2. Corrija erros gramaticais e ortográficos
+3. ${typeInstruction}
+4. ${detailInstruction}
+5. ${toneInstruction}
+6. ${examplesInstruction}
+7. Título conciso e descritivo (máx. 60 caracteres)
 
-Retorne como JSON:
-{
-  "title": "Título conciso para a nota",
-  "content": "Conteúdo formatado e estruturado em Markdown com quebras de linha adequadas"
-}`;
+Retorne SOMENTE JSON compacto: {"t":"título","c":"conteúdo markdown"}`;
     } else {
-      prompt = `Você é um especialista em formatação de notas. Transforme o texto extraído em uma nota limpa e bem organizada.
+      prompt = `Você é um especialista em formatação de notas. Transforme o texto em uma nota organizada.${themeContext}
 
-Suas tarefas:
-1. Corrija erros gramaticais e ortográficos óbvios
-2. Adicione formatação adequada em Markdown (títulos, listas, negrito onde relevante)
-3. Organize o conteúdo em seções lógicas
-4. ${typeInstruction}
-5. ${detailInstruction}
-6. ${toneInstruction}
-7. ${examplesInstruction}
-8. Gere um título conciso e descritivo (máximo 60 caracteres)
-9. Responda SEMPRE em português brasileiro
+1. Corrija erros gramaticais e ortográficos
+2. Formate em Markdown adequado
+3. ${typeInstruction}
+4. ${detailInstruction}
+5. ${toneInstruction}
+6. ${examplesInstruction}
+7. Título conciso e descritivo (máx. 60 caracteres)
 
-Retorne como JSON:
-{
-  "title": "Título conciso para a nota",
-  "content": "Conteúdo formatado e estruturado em Markdown com quebras de linha adequadas"
-}
+Retorne SOMENTE JSON compacto: {"t":"título","c":"conteúdo markdown"}
 
-Texto a estruturar: ${text}`;
+Texto: ${text}`;
     }
 
     const response = await openai.chat.completions.create({
       model: 'gpt-5.4-nano-2026-03-17',
       messages: [
-        {
-          role: 'system',
-          content: SYSTEM_PT_BR,
-        },
-        {
-          role: 'user',
-          content: prompt,
-        },
+        { role: 'system', content: SYSTEM_PT_BR },
+        { role: 'user', content: prompt },
       ],
       response_format: { type: 'json_object' },
       max_completion_tokens: 4096,
     });
 
-    const result = JSON.parse(response.choices[0].message.content ?? '{}');
-    res.json(result);
+    const raw = JSON.parse(response.choices[0].message.content ?? '{}') as {
+      t?: unknown;
+      c?: unknown;
+      title?: unknown;
+      content?: unknown;
+    };
+    const title = typeof raw.t === 'string' ? raw.t : (typeof raw.title === 'string' ? raw.title : '');
+    const content = typeof raw.c === 'string' ? raw.c : (typeof raw.content === 'string' ? raw.content : '');
+    res.json({ title, content });
   } catch (error) {
     console.error('Structure error:', error);
     res.status(500).json({ error: 'Failed to structure note' });
+  }
+});
+
+/**
+ * POST /api/generate
+ * Requires authentication.
+ * Body: { notes: Array<{title, content}>, prompt: string, noteType?: string, config?: NoteConfigApi }
+ * Response: { title: string, content: string }
+ */
+app.post('/api/generate', requireAuth, structureLimiter, async (req: AuthRequest, res: Response) => {
+  try {
+    const { notes: inputNotes, prompt, noteType, config } = req.body as {
+      notes?: Array<{ title: string; content: string }>;
+      prompt?: string;
+      noteType?: string;
+      config?: {
+        detailLevel?: 'resumido' | 'normal' | 'detalhado';
+        tone?: 'formal' | 'neutro' | 'casual';
+        includeExamples?: boolean;
+      };
+    };
+
+    if (!prompt || !Array.isArray(inputNotes) || inputNotes.length === 0) {
+      res.status(400).json({ error: 'notes e prompt são obrigatórios' });
+      return;
+    }
+
+    const typeInstruction =
+      (noteType && NOTE_TYPE_INSTRUCTIONS[noteType]) || DEFAULT_NOTE_INSTRUCTION;
+
+    const notesContext = inputNotes
+      .map((n, i) => `### Nota ${i + 1}: ${n.title}\n${n.content}`)
+      .join('\n\n---\n\n');
+
+    const detailInstructions: Record<string, string> = {
+      resumido: 'Seja conciso, apenas pontos essenciais.',
+      normal: 'Nível de detalhe equilibrado.',
+      detalhado: 'Seja abrangente e aprofundado.',
+    };
+    const toneInstructions: Record<string, string> = {
+      formal: 'Linguagem formal e profissional.',
+      neutro: 'Linguagem neutra e objetiva.',
+      casual: 'Linguagem casual e acessível.',
+    };
+
+    const detailInstruction = detailInstructions[config?.detailLevel ?? 'normal'];
+    const toneInstruction = toneInstructions[config?.tone ?? 'neutro'];
+
+    const aiPrompt = `Com base nas notas fornecidas, crie uma nova nota seguindo a instrução do usuário.
+
+NOTAS DE REFERÊNCIA:
+${notesContext}
+
+INSTRUÇÃO DO USUÁRIO: ${prompt}
+
+FORMATO: ${typeInstruction}
+DETALHE: ${detailInstruction}
+TOM: ${toneInstruction}
+${config?.includeExamples ? 'Inclua exemplos práticos.' : ''}
+
+Retorne SOMENTE JSON compacto: {"t":"título","c":"conteúdo markdown"}`;
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-5.4-nano-2026-03-17',
+      messages: [
+        { role: 'system', content: SYSTEM_PT_BR },
+        { role: 'user', content: aiPrompt },
+      ],
+      response_format: { type: 'json_object' },
+      max_completion_tokens: 4096,
+    });
+
+    const raw = JSON.parse(response.choices[0].message.content ?? '{}') as {
+      t?: unknown;
+      c?: unknown;
+      title?: unknown;
+      content?: unknown;
+    };
+    const title = typeof raw.t === 'string' ? raw.t : (typeof raw.title === 'string' ? raw.title : 'Nova nota');
+    const content = typeof raw.c === 'string' ? raw.c : (typeof raw.content === 'string' ? raw.content : '');
+    res.json({ title, content });
+  } catch (error) {
+    console.error('Generate error:', error);
+    res.status(500).json({ error: 'Failed to generate note' });
+  }
+});
+
+/**
+ * POST /api/slides
+ * Requires authentication.
+ * Body: { prompt: string, context: string, noteType?: string, config?: NoteConfigApi }
+ * Response: { title: string, content: string }
+ */
+app.post('/api/slides', requireAuth, structureLimiter, async (req: AuthRequest, res: Response) => {
+  try {
+    const { prompt, context, config } = req.body as {
+      prompt?: string;
+      context?: string;
+      config?: {
+        detailLevel?: 'resumido' | 'normal' | 'detalhado';
+        tone?: 'formal' | 'neutro' | 'casual';
+        includeExamples?: boolean;
+      };
+    };
+
+    if (!prompt || !context) {
+      res.status(400).json({ error: 'prompt e context são obrigatórios' });
+      return;
+    }
+
+    const detailInstructions: Record<string, string> = {
+      resumido: '3-4 slides concisos.',
+      normal: '5-7 slides equilibrados.',
+      detalhado: '8-12 slides detalhados.',
+    };
+    const detailInstruction = detailInstructions[config?.detailLevel ?? 'normal'];
+
+    const aiPrompt = `Crie uma estrutura de slides para uma apresentação.
+
+CONTEXTO DA APRESENTAÇÃO: ${context}
+CONTEÚDO/PROMPT: ${prompt}
+QUANTIDADE: ${detailInstruction}
+
+Cada slide deve ter título (heading), conteúdo (bullets ou texto) e notas do apresentador.
+
+Retorne SOMENTE JSON compacto:
+{"t":"título da apresentação","sl":[{"h":"título do slide","b":"conteúdo/bullets","n":"notas do apresentador"}]}`;
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-5.4-nano-2026-03-17',
+      messages: [
+        { role: 'system', content: SYSTEM_PT_BR },
+        { role: 'user', content: aiPrompt },
+      ],
+      response_format: { type: 'json_object' },
+      max_completion_tokens: 4096,
+    });
+
+    const raw = JSON.parse(response.choices[0].message.content ?? '{}') as {
+      t?: unknown;
+      sl?: Array<{ h?: unknown; b?: unknown; n?: unknown }>;
+      title?: unknown;
+    };
+
+    const presentationTitle = typeof raw.t === 'string' ? raw.t : (typeof raw.title === 'string' ? raw.title : 'Apresentação');
+    const slides = Array.isArray(raw.sl) ? raw.sl : [];
+
+    const markdownContent = slides
+      .map((slide) => {
+        const heading = typeof slide.h === 'string' ? slide.h : '';
+        const body = typeof slide.b === 'string' ? slide.b : '';
+        const notes = typeof slide.n === 'string' ? slide.n : '';
+        let md = `## ${heading}\n\n${body}`;
+        if (notes) md += `\n\n> ${notes}`;
+        return md;
+      })
+      .join('\n\n---\n\n');
+
+    res.json({ title: presentationTitle, content: `# ${presentationTitle}\n\n${markdownContent}` });
+  } catch (error) {
+    console.error('Slides error:', error);
+    res.status(500).json({ error: 'Failed to generate slides' });
   }
 });
 

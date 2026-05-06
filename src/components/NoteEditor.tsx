@@ -109,7 +109,23 @@ export function NoteEditor({ note, onSave, onCancel }: NoteEditorProps) {
           )}
         </div>
 
-        {note.originalImage && (
+        {(note.originalImages && note.originalImages.length > 0) ? (
+          <div className="space-y-2">
+            <Label className="text-sm text-muted-foreground">
+              Imagens Originais ({note.originalImages.length})
+            </Label>
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {note.originalImages.map((src, idx) => (
+                <img
+                  key={idx}
+                  src={src}
+                  alt={`Original ${idx + 1}`}
+                  className="h-32 w-auto shrink-0 object-contain rounded-lg border border-border"
+                />
+              ))}
+            </div>
+          </div>
+        ) : note.originalImage ? (
           <div className="space-y-2">
             <Label className="text-sm text-muted-foreground">Imagem Original</Label>
             <img
@@ -118,7 +134,7 @@ export function NoteEditor({ note, onSave, onCancel }: NoteEditorProps) {
               className="w-full max-h-48 object-contain rounded-lg border border-border"
             />
           </div>
-        )}
+        ) : null}
       </div>
 
       <div className="flex gap-3 mt-4 pt-4 border-t border-border">
