@@ -66,7 +66,31 @@ async function get<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-/** Extract text from a base64 data-URL image using the backend OCR endpoint. */
+async function del(path: string): Promise<void> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'DELETE',
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok && res.status !== 204) {
+    const payload = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error((payload as { error?: string }).error ?? res.statusText);
+  }
+}
+
+async function put<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const payload = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error((payload as { error?: string }).error ?? res.statusText);
+  }
+  return res.json() as Promise<T>;
+}
+
+
 export function processImageOcr(imageData: string, theme?: string): Promise<OcrResult> {
   return post<OcrResult>('/api/ocr', { imageData, theme });
 }
@@ -115,4 +139,43 @@ export function login(email: string, password: string): Promise<AuthResult> {
 /** Get current authenticated user info. */
 export function getMe(): Promise<{ id: string; email: string }> {
   return get<{ id: string; email: string }>('/api/auth/me');
+}
+
+// ---------------------------------------------------------------------------
+// Notes CRUD
+// ---------------------------------------------------------------------------
+
+export interface NoteApi {
+  id: string;
+  userId: string;
+  title: string;
+  content: string;
+  noteType?: string;
+  originalImage?: string;
+  originalImages?: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Fetch all notes for the authenticated user. */
+export function getNotes(): Promise<NoteApi[]> {
+  return get<NoteApi[]>('/api/notes');
+}
+
+/** Persist a new note to the backend. */
+export function saveNote(note: Omit<NoteApi, 'userId'>): Promise<NoteApi> {
+  return post<NoteApi>('/api/notes', note);
+}
+
+/** Update an existing note on the backend. */
+export function patchNote(
+  id: string,
+  fields: Partial<Pick<NoteApi, 'title' | 'content' | 'noteType' | 'originalImage' | 'originalImages'>>
+): Promise<NoteApi> {
+  return put<NoteApi>(`/api/notes/${id}`, fields);
+}
+
+/** Delete a note from the backend. */
+export function removeNote(id: string): Promise<void> {
+  return del(`/api/notes/${id}`);
 }

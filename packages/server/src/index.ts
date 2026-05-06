@@ -7,6 +7,8 @@ import rateLimit from 'express-rate-limit';
 import OpenAI from 'openai';
 import { signToken, requireAuth, AuthRequest } from './auth.js';
 import { findByEmail, findById, createUser } from './users.js';
+import { getNotesByUser, createNote, updateNote, deleteNote } from './notes.js';
+import { initDb } from './db.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -121,13 +123,13 @@ app.post('/api/auth/register', authLimiter, async (req: Request, res: Response) 
       return;
     }
 
-    if (findByEmail(email)) {
+    if (await findByEmail(email)) {
       res.status(409).json({ error: 'Email já cadastrado.' });
       return;
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
-    const user = createUser(uuidv4(), email, passwordHash);
+    const user = await createUser(uuidv4(), email, passwordHash);
     const token = signToken({ sub: user.id, email: user.email });
 
     res.status(201).json({ token, user: { id: user.id, email: user.email } });
@@ -151,7 +153,7 @@ app.post('/api/auth/login', authLimiter, async (req: Request, res: Response) => 
       return;
     }
 
-    const user = findByEmail(email);
+    const user = await findByEmail(email);
     // Always run bcrypt.compare to ensure constant-time response and prevent user-enumeration
     const dummyHash = await DUMMY_HASH_PROMISE;
     const valid = await bcrypt.compare(password, user?.passwordHash ?? dummyHash);
@@ -172,8 +174,8 @@ app.post('/api/auth/login', authLimiter, async (req: Request, res: Response) => 
  * GET /api/auth/me
  * Response: { id, email }
  */
-app.get('/api/auth/me', requireAuth, (req: AuthRequest, res: Response) => {
-  const user = findById(req.user!.sub);
+app.get('/api/auth/me', requireAuth, async (req: AuthRequest, res: Response) => {
+  const user = await findById(req.user!.sub);
   if (!user) {
     res.status(404).json({ error: 'Usuário não encontrado.' });
     return;
@@ -656,10 +658,136 @@ Retorne SOMENTE JSON compacto:
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Backend server running on http://localhost:${PORT}`);
-  if (!process.env.OPENAI_API_KEY) {
-    console.warn('⚠️  WARNING: OPENAI_API_KEY is not set – requests will fail');
+// ---------------------------------------------------------------------------
+// Notes CRUD routes
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /api/notes
+ * Requires authentication.
+ * Response: Note[]
+ */
+app.get('/api/notes', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const notes = await getNotesByUser(req.user!.sub);
+    res.json(notes);
+  } catch (error) {
+    console.error('Get notes error:', error);
+    res.status(500).json({ error: 'Erro interno. Tente novamente.' });
   }
-  // JWT_SECRET warnings are handled in auth.ts at module load time
 });
+
+/**
+ * POST /api/notes
+ * Requires authentication.
+ * Body: { id, title, content, noteType?, originalImage?, originalImages?, createdAt, updatedAt }
+ * Response: Note
+ */
+app.post('/api/notes', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id, title, content, noteType, originalImage, originalImages, createdAt, updatedAt } =
+      req.body as {
+        id?: string;
+        title?: string;
+        content?: string;
+        noteType?: string;
+        originalImage?: string;
+        originalImages?: string[];
+        createdAt?: number;
+        updatedAt?: number;
+      };
+
+    if (!id || !title || content === undefined) {
+      res.status(400).json({ error: 'id, title e content são obrigatórios.' });
+      return;
+    }
+
+    const now = Date.now();
+    const note = await createNote({
+      id,
+      userId: req.user!.sub,
+      title,
+      content,
+      noteType,
+      originalImage,
+      originalImages,
+      createdAt: createdAt ?? now,
+      updatedAt: updatedAt ?? now,
+    });
+    res.status(201).json(note);
+  } catch (error) {
+    console.error('Create note error:', error);
+    res.status(500).json({ error: 'Erro interno. Tente novamente.' });
+  }
+});
+
+/**
+ * PUT /api/notes/:id
+ * Requires authentication.
+ * Body: Partial<{ title, content, noteType, originalImage, originalImages }>
+ * Response: Note
+ */
+app.put('/api/notes/:id', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params as { id: string };
+    const { title, content, noteType, originalImage, originalImages } = req.body as {
+      title?: string;
+      content?: string;
+      noteType?: string;
+      originalImage?: string;
+      originalImages?: string[];
+    };
+
+    const note = await updateNote(id, req.user!.sub, {
+      title,
+      content,
+      noteType,
+      originalImage,
+      originalImages,
+    });
+
+    if (!note) {
+      res.status(404).json({ error: 'Nota não encontrada.' });
+      return;
+    }
+    res.json(note);
+  } catch (error) {
+    console.error('Update note error:', error);
+    res.status(500).json({ error: 'Erro interno. Tente novamente.' });
+  }
+});
+
+/**
+ * DELETE /api/notes/:id
+ * Requires authentication.
+ * Response: 204 No Content
+ */
+app.delete('/api/notes/:id', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params as { id: string };
+    const deleted = await deleteNote(id, req.user!.sub);
+    if (!deleted) {
+      res.status(404).json({ error: 'Nota não encontrada.' });
+      return;
+    }
+    res.status(204).send();
+  } catch (error) {
+    console.error('Delete note error:', error);
+    res.status(500).json({ error: 'Erro interno. Tente novamente.' });
+  }
+});
+
+initDb()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`Backend server running on http://localhost:${PORT}`);
+      if (!process.env.OPENAI_API_KEY) {
+        console.warn('⚠️  WARNING: OPENAI_API_KEY is not set – requests will fail');
+      }
+      // JWT_SECRET warnings are handled in auth.ts at module load time
+    });
+  })
+  .catch((err) => {
+    console.error('FATAL: Failed to initialize database:', err);
+    process.exit(1);
+  });
