@@ -35,6 +35,20 @@ export async function initDb(): Promise<void> {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )
   `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS token_usage (
+      id VARCHAR(36) PRIMARY KEY,
+      user_id VARCHAR(36) NOT NULL,
+      note_id VARCHAR(36),
+      operation VARCHAR(50) NOT NULL,
+      prompt_tokens INT NOT NULL DEFAULT 0,
+      completion_tokens INT NOT NULL DEFAULT 0,
+      total_tokens INT NOT NULL DEFAULT 0,
+      created_at BIGINT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
 }
 
 export default pool;

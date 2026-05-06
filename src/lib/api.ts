@@ -119,9 +119,10 @@ export function structureNote(
   noteType?: string,
   existingNote?: { title: string; content: string },
   config?: NoteConfigApi,
-  theme?: string
+  theme?: string,
+  noteId?: string
 ): Promise<StructureResult> {
-  return post<StructureResult>('/api/structure', { text, noteType, existingNote, config, theme });
+  return post<StructureResult>('/api/structure', { text, noteType, existingNote, config, theme, noteId });
 }
 
 /** Generate a new note inspired by existing notes and a user prompt. */
@@ -129,9 +130,10 @@ export function generateNoteFromNotes(
   notes: Array<{ title: string; content: string }>,
   prompt: string,
   noteType?: string,
-  config?: NoteConfigApi
+  config?: NoteConfigApi,
+  noteId?: string
 ): Promise<StructureResult> {
-  return post<StructureResult>('/api/generate', { notes, prompt, noteType, config });
+  return post<StructureResult>('/api/generate', { notes, prompt, noteType, config, noteId });
 }
 
 /** Generate slide-structured markdown from a prompt and context. */
@@ -139,9 +141,10 @@ export function generateSlides(
   prompt: string,
   context: string,
   config?: NoteConfigApi,
-  notesContext?: string
+  notesContext?: string,
+  noteId?: string
 ): Promise<StructureResult> {
-  return post<StructureResult>('/api/slides', { prompt, context, config, notesContext });
+  return post<StructureResult>('/api/slides', { prompt, context, config, notesContext, noteId });
 }
 
 /** Register a new user. */
@@ -196,4 +199,34 @@ export function patchNote(
 /** Delete a note from the backend. */
 export function removeNote(id: string): Promise<void> {
   return del(`/api/notes/${id}`);
+}
+
+// ---------------------------------------------------------------------------
+// Stats
+// ---------------------------------------------------------------------------
+
+export interface TokenOperationStat {
+  operation: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+export interface TokenNoteStat {
+  noteId: string | null;
+  noteTitle: string | null;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+export interface TokenStats {
+  summary: { promptTokens: number; completionTokens: number; totalTokens: number };
+  byOperation: TokenOperationStat[];
+  byNote: TokenNoteStat[];
+}
+
+/** Fetch token usage statistics for the authenticated user. */
+export function getTokenStats(): Promise<TokenStats> {
+  return get<TokenStats>('/api/stats/tokens');
 }

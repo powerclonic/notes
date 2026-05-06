@@ -9,6 +9,7 @@ import { signToken, requireAuth, AuthRequest } from './auth.js';
 import { findByEmail, findById, createUser } from './users.js';
 import { getNotesByUser, createNote, updateNote, deleteNote } from './notes.js';
 import { initDb } from './db.js';
+import pool from './db.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -38,6 +39,28 @@ app.use(express.json({ limit: '50mb' }));
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const SYSTEM_PT_BR = 'Responda em pt-BR.';
+
+// ---------------------------------------------------------------------------
+// Token usage tracking
+// ---------------------------------------------------------------------------
+
+async function trackTokenUsage(
+  userId: string,
+  noteId: string | null,
+  operation: string,
+  usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | null | undefined
+): Promise<void> {
+  if (!usage) return;
+  try {
+    await pool.execute(
+      'INSERT INTO token_usage (id, user_id, note_id, operation, prompt_tokens, completion_tokens, total_tokens, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [uuidv4(), userId, noteId ?? null, operation, usage.prompt_tokens, usage.completion_tokens, usage.total_tokens, Date.now()]
+    );
+  } catch (err) {
+    // Non-fatal: log and continue
+    console.error('Failed to track token usage:', err);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Rate limiters
@@ -266,6 +289,8 @@ Regras:
       uw?: Array<{ w?: unknown; s?: unknown; e?: unknown; sg?: unknown }>;
     };
 
+    void trackTokenUsage(req.user!.sub, null, 'ocr', pass1Response.usage);
+
     // Decode compact keys with guardrails
     const fullText: string = typeof pass1Raw.ft === 'string' ? pass1Raw.ft : '';
     const imageType: string = typeof pass1Raw.tp === 'string' ? pass1Raw.tp : 'print';
@@ -325,6 +350,8 @@ Responda SOMENTE com JSON compacto:
       const pass2Raw = JSON.parse(pass2Response.choices[0].message.content ?? '{}') as {
         bx?: Array<{ i?: unknown; x?: unknown; y?: unknown; w?: unknown; h?: unknown }>;
       };
+
+      void trackTokenUsage(req.user!.sub, null, 'ocr-bbox', pass2Response.usage);
 
       // Decode compact keys and merge bboxes back into uncertain words (1-based index)
       for (const entry of Array.isArray(pass2Raw.bx) ? pass2Raw.bx : []) {
@@ -441,6 +468,8 @@ Regras:
       return;
     }
 
+    void trackTokenUsage(req.user!.sub, null, 'ocr-batch', batchResponse.usage);
+
     const finishReason = batchResponse.choices[0].finish_reason;
     if (finishReason === 'length') {
       res.status(422).json({ error: 'OCR batch response was truncated due to token limit. Try reducing the number of images per batch.' });
@@ -511,16 +540,17 @@ const DEFAULT_NOTE_INSTRUCTION = NOTE_TYPE_INSTRUCTIONS['anotacoes'];
 /**
  * POST /api/structure
  * Requires authentication.
- * Body: { text: string, noteType?: string, existingNote?: { title: string, content: string }, theme?: string }
+ * Body: { text: string, noteType?: string, existingNote?: { title: string, content: string }, theme?: string, noteId?: string }
  * Response: { title: string, content: string }
  */
 app.post('/api/structure', requireAuth, structureLimiter, async (req: AuthRequest, res: Response) => {
   try {
-    const { text, noteType, existingNote, config, theme } = req.body as {
+    const { text, noteType, existingNote, config, theme, noteId } = req.body as {
       text?: string;
       noteType?: string;
       existingNote?: { title: string; content: string };
       theme?: string;
+      noteId?: string;
       config?: {
         detailLevel?: 'resumido' | 'normal' | 'detalhado';
         tone?: 'formal' | 'neutro' | 'casual';
@@ -612,6 +642,7 @@ Texto: ${text}`;
       title?: unknown;
       content?: unknown;
     };
+    void trackTokenUsage(req.user!.sub, noteId ?? null, 'structure', response.usage);
     const title = typeof raw.t === 'string' ? raw.t : (typeof raw.title === 'string' ? raw.title : '');
     const content = typeof raw.c === 'string' ? raw.c : (typeof raw.content === 'string' ? raw.content : '');
     res.json({ title, content });
@@ -624,15 +655,16 @@ Texto: ${text}`;
 /**
  * POST /api/generate
  * Requires authentication.
- * Body: { notes: Array<{title, content}>, prompt: string, noteType?: string, config?: NoteConfigApi }
+ * Body: { notes: Array<{title, content}>, prompt: string, noteType?: string, config?: NoteConfigApi, noteId?: string }
  * Response: { title: string, content: string }
  */
 app.post('/api/generate', requireAuth, structureLimiter, async (req: AuthRequest, res: Response) => {
   try {
-    const { notes: inputNotes, prompt, noteType, config } = req.body as {
+    const { notes: inputNotes, prompt, noteType, config, noteId } = req.body as {
       notes?: Array<{ title: string; content: string }>;
       prompt?: string;
       noteType?: string;
+      noteId?: string;
       config?: {
         detailLevel?: 'resumido' | 'normal' | 'detalhado';
         tone?: 'formal' | 'neutro' | 'casual';
@@ -696,6 +728,7 @@ Retorne SOMENTE JSON compacto: {"t":"título","c":"conteúdo markdown"}`;
       title?: unknown;
       content?: unknown;
     };
+    void trackTokenUsage(req.user!.sub, noteId ?? null, 'generate', response.usage);
     const title = typeof raw.t === 'string' ? raw.t : (typeof raw.title === 'string' ? raw.title : 'Nova nota');
     const content = typeof raw.c === 'string' ? raw.c : (typeof raw.content === 'string' ? raw.content : '');
     res.json({ title, content });
@@ -708,15 +741,16 @@ Retorne SOMENTE JSON compacto: {"t":"título","c":"conteúdo markdown"}`;
 /**
  * POST /api/slides
  * Requires authentication.
- * Body: { prompt: string, context: string, config?: NoteConfigApi, notesContext?: string }
+ * Body: { prompt: string, context: string, config?: NoteConfigApi, notesContext?: string, noteId?: string }
  * Response: { title: string, content: string }
  */
 app.post('/api/slides', requireAuth, structureLimiter, async (req: AuthRequest, res: Response) => {
   try {
-    const { prompt, context, config, notesContext } = req.body as {
+    const { prompt, context, config, notesContext, noteId } = req.body as {
       prompt?: string;
       context?: string;
       notesContext?: string;
+      noteId?: string;
       config?: {
         detailLevel?: 'resumido' | 'normal' | 'detalhado';
         tone?: 'formal' | 'neutro' | 'casual';
@@ -766,6 +800,8 @@ Retorne SOMENTE JSON compacto:
       title?: unknown;
     };
 
+    void trackTokenUsage(req.user!.sub, noteId ?? null, 'slides', response.usage);
+
     const presentationTitle = typeof raw.t === 'string' ? raw.t : (typeof raw.title === 'string' ? raw.title : 'Apresentação');
     const slides = Array.isArray(raw.sl) ? raw.sl : [];
 
@@ -784,6 +820,98 @@ Retorne SOMENTE JSON compacto:
   } catch (error) {
     console.error('Slides error:', error);
     res.status(500).json({ error: 'Failed to generate slides' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Stats routes
+// ---------------------------------------------------------------------------
+
+interface TokenUsageRow {
+  operation: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
+interface NoteTokenRow {
+  note_id: string | null;
+  note_title: string | null;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
+/**
+ * GET /api/stats/tokens
+ * Requires authentication.
+ * Response: { summary, byOperation, byNote }
+ */
+app.get('/api/stats/tokens', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user!.sub;
+
+    const [summaryRows] = await pool.execute(
+      `SELECT
+         SUM(prompt_tokens) AS prompt_tokens,
+         SUM(completion_tokens) AS completion_tokens,
+         SUM(total_tokens) AS total_tokens
+       FROM token_usage WHERE user_id = ?`,
+      [userId]
+    ) as [TokenUsageRow[], unknown];
+
+    const [byOpRows] = await pool.execute(
+      `SELECT
+         operation,
+         SUM(prompt_tokens) AS prompt_tokens,
+         SUM(completion_tokens) AS completion_tokens,
+         SUM(total_tokens) AS total_tokens
+       FROM token_usage WHERE user_id = ?
+       GROUP BY operation
+       ORDER BY SUM(total_tokens) DESC`,
+      [userId]
+    ) as [TokenUsageRow[], unknown];
+
+    const [byNoteRows] = await pool.execute(
+      `SELECT
+         tu.note_id,
+         n.title AS note_title,
+         SUM(tu.prompt_tokens) AS prompt_tokens,
+         SUM(tu.completion_tokens) AS completion_tokens,
+         SUM(tu.total_tokens) AS total_tokens
+       FROM token_usage tu
+       LEFT JOIN notes n ON tu.note_id = n.id
+       WHERE tu.user_id = ?
+       GROUP BY tu.note_id, n.title
+       ORDER BY SUM(tu.total_tokens) DESC`,
+      [userId]
+    ) as [NoteTokenRow[], unknown];
+
+    const sr = summaryRows[0] ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+
+    res.json({
+      summary: {
+        promptTokens: Number(sr.prompt_tokens) || 0,
+        completionTokens: Number(sr.completion_tokens) || 0,
+        totalTokens: Number(sr.total_tokens) || 0,
+      },
+      byOperation: byOpRows.map((r) => ({
+        operation: r.operation,
+        promptTokens: Number(r.prompt_tokens) || 0,
+        completionTokens: Number(r.completion_tokens) || 0,
+        totalTokens: Number(r.total_tokens) || 0,
+      })),
+      byNote: byNoteRows.map((r) => ({
+        noteId: r.note_id ?? null,
+        noteTitle: r.note_title ?? null,
+        promptTokens: Number(r.prompt_tokens) || 0,
+        completionTokens: Number(r.completion_tokens) || 0,
+        totalTokens: Number(r.total_tokens) || 0,
+      })),
+    });
+  } catch (error) {
+    console.error('Stats error:', error);
+    res.status(500).json({ error: 'Erro ao buscar estatísticas.' });
   }
 });
 
