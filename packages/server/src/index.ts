@@ -396,6 +396,10 @@ app.post('/api/ocr/batch', requireAuth, ocrLimiter, async (req: AuthRequest, res
     const themeContext = theme ? `\nContexto/temática: ${theme}` : '';
     const sectionNumbers = Array.from({ length: imageCount }, (_, i) => i + 1).join(', ');
 
+    // Scale token budget by image count: each image may need up to 4096 tokens.
+    // Cap at 16384 to stay within model limits.
+    const batchMaxTokens = Math.min(imageCount * 4096, 16384);
+
     const batchResponse = await openai.chat.completions.create({
       model: 'gpt-5.4-nano-2026-03-17',
       messages: [
@@ -429,8 +433,14 @@ Regras:
         },
       ],
       response_format: { type: 'json_object' },
-      max_completion_tokens: 8192,
+      max_completion_tokens: batchMaxTokens,
     });
+
+    const finishReason = batchResponse.choices[0].finish_reason;
+    if (finishReason === 'length') {
+      res.status(422).json({ error: 'OCR batch response was truncated due to token limit. Try reducing the number of images per batch.' });
+      return;
+    }
 
     const batchRaw = JSON.parse(batchResponse.choices[0].message.content ?? '{}') as {
       sections?: Array<{
