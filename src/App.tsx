@@ -190,6 +190,7 @@ function App() {
         const newNote: Note = {
           id: crypto.randomUUID(),
           title: result.title || 'Nota sem título',
+          content: result.content || text,
           noteType: selectedNoteType,
           originalImage: currentImages[0] || undefined,
           originalImages: currentImages.length > 0 ? currentImages : undefined,
@@ -687,24 +688,29 @@ function App() {
                           Notas de referência <span className="text-muted-foreground font-normal">(opcional)</span>
                         </label>
                         <div className="max-h-36 overflow-y-auto space-y-1 border border-border rounded-md p-2">
-                          {notes.map((note) => {
-                            const toggleNote = () =>
-                              setSlidesNoteIds((prev) => {
-                                const next = new Set(prev);
-                                if (next.has(note.id)) next.delete(note.id);
-                                else next.add(note.id);
-                                return next;
-                              });
-                            return (
+                          {notes.map((note) => (
                             <div
                               key={note.id}
                               className="flex items-center gap-2 px-1 py-0.5 rounded hover:bg-muted/50 cursor-pointer"
-                              onClick={toggleNote}
+                              onClick={() =>
+                                setSlidesNoteIds((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(note.id)) next.delete(note.id);
+                                  else next.add(note.id);
+                                  return next;
+                                })
+                              }
                             >
                               <Checkbox
                                 checked={slidesNoteIds.has(note.id)}
-                                onCheckedChange={toggleNote}
-                                className="pointer-events-none"
+                                onCheckedChange={() =>
+                                  setSlidesNoteIds((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(note.id)) next.delete(note.id);
+                                    else next.add(note.id);
+                                    return next;
+                                  })
+                                }
                               />
                               <span className="text-xs text-foreground truncate flex-1">{note.title}</span>
                               {note.noteType && (
@@ -713,8 +719,7 @@ function App() {
                                 </Badge>
                               )}
                             </div>
-                            );
-                          })}
+                          ))}
                         </div>
                       </div>
                     )}
