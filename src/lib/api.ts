@@ -16,6 +16,7 @@ export interface UncertainWordApi {
 export interface OcrResult {
   fullText: string;
   uncertainWords: UncertainWordApi[];
+  imageType?: string;
 }
 
 export interface StructureResult {
@@ -66,8 +67,8 @@ async function get<T>(path: string): Promise<T> {
 }
 
 /** Extract text from a base64 data-URL image using the backend OCR endpoint. */
-export function processImageOcr(imageData: string): Promise<OcrResult> {
-  return post<OcrResult>('/api/ocr', { imageData });
+export function processImageOcr(imageData: string, theme?: string): Promise<OcrResult> {
+  return post<OcrResult>('/api/ocr', { imageData, theme });
 }
 
 /** Structure raw text into a titled, formatted note via the backend. */
@@ -75,9 +76,29 @@ export function structureNote(
   text: string,
   noteType?: string,
   existingNote?: { title: string; content: string },
+  config?: NoteConfigApi,
+  theme?: string
+): Promise<StructureResult> {
+  return post<StructureResult>('/api/structure', { text, noteType, existingNote, config, theme });
+}
+
+/** Generate a new note inspired by existing notes and a user prompt. */
+export function generateNoteFromNotes(
+  notes: Array<{ title: string; content: string }>,
+  prompt: string,
+  noteType?: string,
   config?: NoteConfigApi
 ): Promise<StructureResult> {
-  return post<StructureResult>('/api/structure', { text, noteType, existingNote, config });
+  return post<StructureResult>('/api/generate', { notes, prompt, noteType, config });
+}
+
+/** Generate slide-structured markdown from a prompt and context. */
+export function generateSlides(
+  prompt: string,
+  context: string,
+  config?: NoteConfigApi
+): Promise<StructureResult> {
+  return post<StructureResult>('/api/slides', { prompt, context, config });
 }
 
 /** Register a new user. */

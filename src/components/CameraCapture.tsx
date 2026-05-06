@@ -1,10 +1,10 @@
 import { useRef, useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Camera, X, Check } from '@phosphor-icons/react';
+import { Camera, X, Check, Plus } from '@phosphor-icons/react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
 interface CameraCaptureProps {
-  onCapture: (imageData: string) => void;
+  onCapture: (imageData: string | string[]) => void;
   onCancel: () => void;
 }
 
@@ -14,6 +14,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [capturedImages, setCapturedImages] = useState<string[]>([]);
 
   useEffect(() => {
     startCamera();
@@ -58,7 +59,15 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
       if (stream) {
         stream.getTracks().forEach((track) => track.stop());
       }
-      onCapture(capturedImage);
+      const allImages = [...capturedImages, capturedImage];
+      onCapture(allImages.length === 1 ? allImages[0] : allImages);
+    }
+  };
+
+  const addAnotherPhoto = () => {
+    if (capturedImage) {
+      setCapturedImages((prev) => [...prev, capturedImage]);
+      setCapturedImage(null);
     }
   };
 
@@ -94,6 +103,11 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
             <div className="absolute inset-0 pointer-events-none">
               <div className="absolute inset-0 border-2 border-white/30 m-8 rounded-lg" />
             </div>
+            {capturedImages.length > 0 && (
+              <div className="absolute top-4 left-4 bg-black/60 text-white text-xs px-2 py-1 rounded-full">
+                {capturedImages.length} foto{capturedImages.length !== 1 ? 's' : ''} adicionada{capturedImages.length !== 1 ? 's' : ''}
+              </div>
+            )}
           </>
         ) : (
           <img src={capturedImage} alt="Captured" className="w-full h-full object-contain" />
@@ -118,6 +132,15 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
           <>
             <Button onClick={retake} variant="outline" size="lg" className="rounded-full">
               <X className="w-5 h-5" />
+            </Button>
+            <Button
+              onClick={addAnotherPhoto}
+              size="lg"
+              variant="outline"
+              className="rounded-full border-white/40 text-white"
+            >
+              <Plus className="w-5 h-5" />
+              <span className="ml-2">Outra foto</span>
             </Button>
             <Button
               onClick={confirmCapture}

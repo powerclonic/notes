@@ -25,7 +25,7 @@ export interface ProcessedNote {
   title?: string;
 }
 
-export type NoteType = 'mapa-mental' | 'insights-corporativos' | 'anotacoes' | 'ideias';
+export type NoteType = 'mapa-mental' | 'insights-corporativos' | 'anotacoes' | 'ideias' | 'slides';
 
 export type DetailLevel = 'resumido' | 'normal' | 'detalhado';
 export type WritingTone = 'formal' | 'neutro' | 'casual';
@@ -41,6 +41,7 @@ export const NOTE_TYPE_LABELS: Record<NoteType, string> = {
   'insights-corporativos': 'Insights Corporativos',
   'anotacoes': 'Anotações',
   'ideias': 'Ideias',
+  'slides': 'Slides',
 };
 
 export const NOTE_TYPE_ICONS: Record<NoteType, string> = {
@@ -48,6 +49,7 @@ export const NOTE_TYPE_ICONS: Record<NoteType, string> = {
   'insights-corporativos': '💼',
   'anotacoes': '📝',
   'ideias': '💡',
+  'slides': '🎞️',
 };
 
 export const DETAIL_LEVEL_LABELS: Record<DetailLevel, string> = {
@@ -74,6 +76,7 @@ export interface Note {
   content: string;
   noteType?: NoteType;
   originalImage?: string;
+  originalImages?: string[];
   createdAt: number;
   updatedAt: number;
 }
