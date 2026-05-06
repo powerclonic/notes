@@ -10,6 +10,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import {
   Select,
   SelectContent,
@@ -185,8 +186,7 @@ function App() {
         toast.success('Nota atualizada com sucesso!', { description: updatedNote.title });
       } else {
         const newNote: Note = {
-          id: Date.now().toString(),
-          title: result.title || 'Nota sem título',
+          id: crypto.randomUUID(),
           content: result.content || text,
           noteType: selectedNoteType,
           originalImage: currentImages[0] || undefined,
@@ -209,8 +209,7 @@ function App() {
       toast.error('Erro ao estruturar nota. Salvando texto bruto...');
 
       const newNote: Note = {
-        id: Date.now().toString(),
-        title: 'Nota sem título',
+        id: crypto.randomUUID(),
         content: text,
         noteType: selectedNoteType,
         originalImage: currentImages[0] || undefined,
@@ -531,20 +530,10 @@ function App() {
                 {/* Include examples toggle */}
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-medium text-foreground">Incluir exemplos práticos</p>
-                  <button
-                    onClick={() => setNoteConfig((c) => ({ ...c, includeExamples: !c.includeExamples }))}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
-                      noteConfig.includeExamples ? 'bg-primary' : 'bg-muted'
-                    }`}
-                    role="switch"
-                    aria-checked={noteConfig.includeExamples}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                        noteConfig.includeExamples ? 'translate-x-6' : 'translate-x-1'
-                      }`}
-                    />
-                  </button>
+                  <Switch
+                    checked={noteConfig.includeExamples}
+                    onCheckedChange={(checked) => setNoteConfig((c) => ({ ...c, includeExamples: checked }))}
+                  />
                 </div>
 
                 {/* Update existing note selector */}
