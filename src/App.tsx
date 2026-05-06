@@ -4,6 +4,7 @@ import { processImageOcr, structureNote, generateNoteFromNotes, generateSlides }
 import { useAuth } from '@/contexts/AuthContext';
 import { LoginPage } from '@/components/LoginPage';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -71,6 +72,7 @@ function App() {
   const [slidesPrompt, setSlidesPrompt] = useState('');
   const [slidesContext, setSlidesContext] = useState('');
   const [slidesContextError, setSlidesContextError] = useState(false);
+  const [slidesNoteIds, setSlidesNoteIds] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleImageCapture = (imageData: string | string[]) => {
@@ -316,7 +318,10 @@ function App() {
 
     try {
       setCurrentView('processing');
-      const result = await generateSlides(slidesPrompt, slidesContext, noteConfig);
+      const selectedNotes = notes
+        .filter((n) => slidesNoteIds.has(n.id))
+        .map((n) => ({ title: n.title, content: n.content }));
+      const result = await generateSlides(slidesPrompt, slidesContext, noteConfig, selectedNotes.length > 0 ? selectedNotes : undefined);
       const newNote: Note = {
         id: crypto.randomUUID(),
         title: result.title || 'Slides',
@@ -329,6 +334,7 @@ function App() {
       toast.success('Slides gerados com sucesso!', { description: newNote.title });
       setSlidesPrompt('');
       setSlidesContext('');
+      setSlidesNoteIds(new Set());
       setShowSlidesForm(false);
       setActiveTab('library');
     } catch {
@@ -660,7 +666,10 @@ function App() {
                   <Button
                     size="sm"
                     variant={showSlidesForm ? 'secondary' : 'outline'}
-                    onClick={() => setShowSlidesForm((v) => !v)}
+                    onClick={() => {
+                      if (showSlidesForm) setSlidesNoteIds(new Set());
+                      setShowSlidesForm((v) => !v);
+                    }}
                     className="gap-1.5 h-8"
                   >
                     <Sparkle className="w-3.5 h-3.5" />
@@ -669,6 +678,46 @@ function App() {
                 </div>
                 {showSlidesForm && (
                   <div className="space-y-3 mt-3 border-t border-border pt-3">
+                    {notes.length > 0 && (
+                      <div>
+                        <label className="text-xs font-medium text-muted-foreground block mb-1">
+                          Notas de referência <span className="text-muted-foreground font-normal">(opcional)</span>
+                        </label>
+                        <div className="max-h-36 overflow-y-auto space-y-1 border border-border rounded-md p-2">
+                          {notes.map((note) => (
+                            <div
+                              key={note.id}
+                              className="flex items-center gap-2 px-1 py-0.5 rounded hover:bg-muted/50 cursor-pointer"
+                              onClick={() =>
+                                setSlidesNoteIds((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(note.id)) next.delete(note.id);
+                                  else next.add(note.id);
+                                  return next;
+                                })
+                              }
+                            >
+                              <Checkbox
+                                checked={slidesNoteIds.has(note.id)}
+                                onCheckedChange={() =>
+                                  setSlidesNoteIds((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(note.id)) next.delete(note.id);
+                                    else next.add(note.id);
+                                    return next;
+                                  })
+                                }
+                                className="pointer-events-none"
+                              />
+                              <span className="text-xs text-foreground truncate flex-1">{note.title}</span>
+                              <Badge variant="secondary" className="text-[10px] px-1 py-0 shrink-0">
+                                {NOTE_TYPE_LABELS[note.noteType] ?? note.noteType}
+                              </Badge>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <div>
                       <label className="text-xs font-medium text-muted-foreground block mb-1">
                         Contexto da apresentação <span className="text-destructive">*</span>

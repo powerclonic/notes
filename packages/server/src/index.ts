@@ -582,7 +582,7 @@ Retorne SOMENTE JSON compacto: {"t":"título","c":"conteúdo markdown"}`;
  */
 app.post('/api/slides', requireAuth, structureLimiter, async (req: AuthRequest, res: Response) => {
   try {
-    const { prompt, context, config } = req.body as {
+    const { prompt, context, config, notes: inputNotes } = req.body as {
       prompt?: string;
       context?: string;
       config?: {
@@ -590,6 +590,7 @@ app.post('/api/slides', requireAuth, structureLimiter, async (req: AuthRequest, 
         tone?: 'formal' | 'neutro' | 'casual';
         includeExamples?: boolean;
       };
+      notes?: Array<{ title: string; content: string }>;
     };
 
     if (!prompt || !context) {
@@ -604,9 +605,14 @@ app.post('/api/slides', requireAuth, structureLimiter, async (req: AuthRequest, 
     };
     const detailInstruction = detailInstructions[config?.detailLevel ?? 'normal'];
 
+    const notesSection =
+      Array.isArray(inputNotes) && inputNotes.length > 0
+        ? `NOTAS DE REFERÊNCIA:\n${inputNotes.map((n, i) => `### Nota ${i + 1}: ${n.title}\n${n.content}`).join('\n\n---\n\n')}\n\n`
+        : '';
+
     const aiPrompt = `Crie uma estrutura de slides para uma apresentação.
 
-CONTEXTO DA APRESENTAÇÃO: ${context}
+${notesSection}CONTEXTO DA APRESENTAÇÃO: ${context}
 CONTEÚDO/PROMPT: ${prompt}
 QUANTIDADE: ${detailInstruction}
 
