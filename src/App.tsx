@@ -1,13 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { processImageOcr, processImageOcrBatch, structureNote, generateNoteFromNotes, generateSlides, getNotes, saveNote, patchNote, removeNote } from '@/lib/api';
+import { processImageOcr, processImageOcrBatch, structureNote, generateNoteFromNotes, getNotes, saveNote, patchNote, removeNote } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { LoginPage } from '@/components/LoginPage';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -28,7 +27,10 @@ import { WordReviewInterface } from '@/components/WordReviewInterface';
 import { NoteLibrary } from '@/components/NoteLibrary';
 import { NoteEditor } from '@/components/NoteEditor';
 import { TokenStats } from '@/components/TokenStats';
-import { Camera, Upload, Sparkle, X, SignOut, ChartBar } from '@phosphor-icons/react';
+import { SlidesWorkspace } from '@/components/SlidesWorkspace';
+import { SlideDeck } from '@/components/SlideDeck';
+import { parseSlideDsl } from '@/lib/slideDsl';
+import { Camera, Upload, Sparkle, X, SignOut, ChartBar, ArrowLeft, Presentation } from '@phosphor-icons/react';
 import {
   Note,
   NoteType,
@@ -46,7 +48,7 @@ import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 import { compressToWebP, buildImageGrid, chunkArray, getGridLayout } from '@/lib/imageUtils';
 
-type AppView = 'home' | 'camera' | 'processing' | 'review' | 'edit';
+type AppView = 'home' | 'camera' | 'processing' | 'review' | 'edit' | 'slides-create' | 'slides-view';
 
 const NOTE_TYPES: NoteType[] = ['anotacoes', 'ideias', 'mapa-mental', 'insights-corporativos'];
 const DETAIL_LEVELS: DetailLevel[] = ['resumido', 'normal', 'detalhado'];
@@ -70,16 +72,12 @@ function App() {
   const [extractedText, setExtractedText] = useState<string>('');
   const [uncertainWords, setUncertainWords] = useState<UncertainWord[]>([]);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
+  const [slidesViewNote, setSlidesViewNote] = useState<Note | null>(null);
   const [activeTab, setActiveTab] = useState<string>('new');
   const [selectedNoteType, setSelectedNoteType] = useState<NoteType>('anotacoes');
   const [noteToUpdate, setNoteToUpdate] = useState<Note | null>(null);
   const [noteConfig, setNoteConfig] = useState<NoteConfig>(DEFAULT_NOTE_CONFIG);
   const [noteTheme, setNoteTheme] = useState<string>('');
-  const [showSlidesForm, setShowSlidesForm] = useState(false);
-  const [slidesPrompt, setSlidesPrompt] = useState('');
-  const [slidesContext, setSlidesContext] = useState('');
-  const [slidesContextError, setSlidesContextError] = useState(false);
-  const [slidesSelectedNotes, setSlidesSelectedNotes] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load notes from backend when user is authenticated
@@ -305,8 +303,13 @@ function App() {
   };
 
   const handleEditNote = (note: Note) => {
-    setEditingNote(note);
-    setCurrentView('edit');
+    if (note.noteType === 'slides') {
+      setSlidesViewNote(note);
+      setCurrentView('slides-view');
+    } else {
+      setEditingNote(note);
+      setCurrentView('edit');
+    }
   };
 
   const handleSaveEdit = async (updatedNote: Note) => {
@@ -411,54 +414,6 @@ function App() {
     }
   };
 
-  const handleGenerateSlides = async () => {
-    if (!slidesContext.trim()) {
-      setSlidesContextError(true);
-      return;
-    }
-
-    const newNoteId = uuidv4();
-
-    try {
-      setCurrentView('processing');
-
-      // Get selected notes for context
-      const selectedNotesForSlides = notes.filter((n) => slidesSelectedNotes.has(n.id));
-      const notesContext = selectedNotesForSlides.length > 0
-        ? selectedNotesForSlides.map((n) => `## ${n.title}\n\n${n.content}`).join('\n\n---\n\n')
-        : undefined;
-
-      const result = await generateSlides(
-        slidesPrompt || slidesContext,
-        slidesContext,
-        noteConfig,
-        notesContext,
-        newNoteId
-      );
-      const now = Date.now();
-      const newNote: Note = {
-        id: newNoteId,
-        title: result.title || 'Slides',
-        content: result.content || '',
-        noteType: 'slides',
-        createdAt: now,
-        updatedAt: now,
-      };
-      await saveNote({ ...newNote, noteType: newNote.noteType });
-      setNotes((prev) => [newNote, ...prev]);
-      toast.success('Slides gerados com sucesso!', { description: newNote.title });
-      setSlidesPrompt('');
-      setSlidesContext('');
-      setSlidesSelectedNotes(new Set());
-      setShowSlidesForm(false);
-      setActiveTab('library');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Erro ao gerar slides. Tente novamente.');
-    } finally {
-      setCurrentView('home');
-    }
-  };
-
 
   if (isLoading || notesLoading) {
     return (
@@ -538,6 +493,50 @@ function App() {
               setCurrentView('home');
             }}
           />
+        </div>
+      </div>
+    );
+  }
+
+  if (currentView === 'slides-create') {
+    return (
+      <SlidesWorkspace
+        notes={notes}
+        onSave={(newNote) => {
+          setNotes((prev) => [newNote, ...prev]);
+          setCurrentView('home');
+          setActiveTab('library');
+        }}
+        onBack={() => setCurrentView('home')}
+      />
+    );
+  }
+
+  if (currentView === 'slides-view' && slidesViewNote) {
+    const presentation = parseSlideDsl(slidesViewNote.content);
+    return (
+      <div className="min-h-screen bg-background">
+        <div className="max-w-2xl mx-auto px-4 pt-6 pb-10 space-y-5">
+          <div className="flex items-center gap-3">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="shrink-0"
+              onClick={() => {
+                setSlidesViewNote(null);
+                setCurrentView('home');
+              }}
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </Button>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-xl font-bold text-foreground truncate">{slidesViewNote.title}</h2>
+              <p className="text-xs text-muted-foreground">
+                {presentation.slides.length} slide{presentation.slides.length !== 1 ? 's' : ''}
+              </p>
+            </div>
+          </div>
+          <SlideDeck presentation={presentation} />
         </div>
       </div>
     );
@@ -802,96 +801,17 @@ function App() {
               </CardContent>
             </Card>
 
-            {/* Slide mode */}
-            <Card>
-              <CardContent className="pt-4 pb-4">
-                <div className="flex items-center justify-between mb-2">
-                  <div>
-                    <p className="text-sm font-medium text-foreground">🎞️ Modo Slide</p>
-                    <p className="text-xs text-muted-foreground">Gere slides baseados em suas notas</p>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant={showSlidesForm ? 'secondary' : 'outline'}
-                    onClick={() => setShowSlidesForm((v) => !v)}
-                    className="gap-1.5 h-8"
-                  >
-                    <Sparkle className="w-3.5 h-3.5" />
-                    Criar Slides
-                  </Button>
-                </div>
-                {showSlidesForm && (
-                  <div className="space-y-3 mt-3 border-t border-border pt-3">
-                    {notes.length > 0 && (
-                      <div>
-                        <label className="text-xs font-medium text-muted-foreground block mb-1.5">
-                          Notas de referência <span className="text-muted-foreground font-normal">(opcional)</span>
-                        </label>
-                        <div className="space-y-1.5 max-h-32 overflow-y-auto border border-border rounded-lg p-2 bg-muted/20">
-                          {notes.map((note) => (
-                            <label
-                              key={note.id}
-                              className="flex items-center gap-2 p-1.5 rounded hover:bg-muted/50 cursor-pointer text-sm"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={slidesSelectedNotes.has(note.id)}
-                                onChange={(e) => {
-                                  setSlidesSelectedNotes((prev) => {
-                                    const next = new Set(prev);
-                                    if (e.target.checked) next.add(note.id);
-                                    else next.delete(note.id);
-                                    return next;
-                                  });
-                                }}
-                                className="w-3.5 h-3.5"
-                              />
-                              <span className="flex-1 truncate text-xs">{note.title}</span>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground block mb-1">
-                        Onde será usada? <span className="text-destructive">*</span>
-                      </label>
-                      <Input
-                        value={slidesContext}
-                        onChange={(e) => {
-                          setSlidesContext(e.target.value);
-                          if (e.target.value.trim()) setSlidesContextError(false);
-                        }}
-                        placeholder="Ex: Aula de química para o ensino médio"
-                        className={`text-sm ${slidesContextError ? 'border-destructive' : ''}`}
-                      />
-                      {slidesContextError && (
-                        <p className="text-xs text-destructive mt-1">Este campo é obrigatório.</p>
-                      )}
-                    </div>
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground block mb-1">
-                        Conteúdo adicional <span className="text-muted-foreground font-normal">(opcional)</span>
-                      </label>
-                      <Textarea
-                        value={slidesPrompt}
-                        onChange={(e) => setSlidesPrompt(e.target.value)}
-                        placeholder="Tópicos extras ou instruções específicas..."
-                        className="text-sm min-h-[56px] resize-none"
-                      />
-                    </div>
-                    <Button
-                      onClick={handleGenerateSlides}
-                      disabled={!slidesContext.trim()}
-                      className="w-full gap-1.5"
-                    >
-                      <Sparkle className="w-4 h-4" />
-                      Gerar Slides
-                    </Button>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+            {/* Slide mode — dedicated workspace */}
+            <Button
+              variant="outline"
+              className="w-full gap-2 justify-start h-12"
+              onClick={() => setCurrentView('slides-create')}
+            >
+              <Presentation className="w-5 h-5 text-accent" weight="fill" />
+              <div className="text-left">
+                <p className="text-sm font-medium">Criar Apresentação</p>
+              </div>
+            </Button>
 
             {/* Tips */}
             <div className="px-3 py-2.5 bg-muted/60 rounded-lg">
