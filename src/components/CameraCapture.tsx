@@ -53,6 +53,9 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
         // Compress to WebP (max 1280px, quality 0.75) before storing
         compressToWebP(rawData, 1280, 0.75).then((compressed) => {
           setCapturedImage(compressed);
+        }).catch(() => {
+          // Fall back to original JPEG capture if compression fails
+          setCapturedImage(rawData);
         });
       }
     }

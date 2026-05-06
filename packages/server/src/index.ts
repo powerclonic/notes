@@ -407,6 +407,8 @@ app.post('/api/ocr/batch', requireAuth, ocrLimiter, async (req: AuthRequest, res
               type: 'text',
               text: `Você é um especialista em OCR. Esta imagem é uma grade ${cols}×${rows} contendo ${imageCount} seções numeradas (${sectionNumbers}), da esquerda para a direita, de cima para baixo. Cada seção tem seu número no canto superior esquerdo.${themeContext}
 
+Campos JSON: ft=texto completo, tp=tipo de imagem, uw=palavras incertas, w=palavra, s=startIndex, e=endIndex, sg=sugestões.
+
 Para CADA seção, faça:
 1. Classifique como "slide", "hw" ou "print".
 2. Extraia todo o texto visível.

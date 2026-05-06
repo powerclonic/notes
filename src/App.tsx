@@ -136,6 +136,7 @@ function App() {
   };
 
   const processImages = async (images: string[]) => {
+    const TEXT_SEPARATOR = '\n\n---\n\n';
     try {
       const allTexts: string[] = [];
       const allUncertainWords: UncertainWord[] = [];
@@ -181,7 +182,7 @@ function App() {
                 endIndex: w.endIndex + textOffset,
               });
             }
-            textOffset += result.fullText.length + '\n\n---\n\n'.length;
+            textOffset += result.fullText.length + TEXT_SEPARATOR.length;
           }
         }
       }
@@ -194,7 +195,7 @@ function App() {
         return;
       }
 
-      const combinedText = allTexts.join('\n\n---\n\n');
+      const combinedText = allTexts.join(TEXT_SEPARATOR);
       setExtractedText(combinedText);
       setUncertainWords(allUncertainWords);
 
