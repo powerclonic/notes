@@ -2,6 +2,7 @@ import { useRef, useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Camera, X, Check, Plus } from '@phosphor-icons/react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { compressToWebP } from '@/lib/imageUtils';
 
 interface CameraCaptureProps {
   onCapture: (imageData: string | string[]) => void;
@@ -48,8 +49,14 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.drawImage(video, 0, 0);
-        const imageData = canvas.toDataURL('image/jpeg', 0.9);
-        setCapturedImage(imageData);
+        const rawData = canvas.toDataURL('image/jpeg', 0.95);
+        // Compress to WebP (max 1280px, quality 0.75) before storing
+        compressToWebP(rawData, 1280, 0.75).then((compressed) => {
+          setCapturedImage(compressed);
+        }).catch(() => {
+          // Fall back to original JPEG capture if compression fails
+          setCapturedImage(rawData);
+        });
       }
     }
   };
