@@ -16,11 +16,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from '@/components/ui/sheet';
 import { CameraCapture } from '@/components/CameraCapture';
 import { WordReviewInterface } from '@/components/WordReviewInterface';
 import { NoteLibrary } from '@/components/NoteLibrary';
 import { NoteEditor } from '@/components/NoteEditor';
-import { Camera, Upload, Sparkle, X, SignOut } from '@phosphor-icons/react';
+import { TokenStats } from '@/components/TokenStats';
+import { Camera, Upload, Sparkle, X, SignOut, ChartBar } from '@phosphor-icons/react';
 import {
   Note,
   NoteType,
@@ -224,7 +232,10 @@ function App() {
         ? { title: noteToUpdate.title, content: noteToUpdate.content }
         : undefined;
 
-      const result = await structureNote(text, selectedNoteType, existingNotePayload, noteConfig, noteTheme || undefined);
+      // Pre-generate the note ID so token usage can be linked to the note on the backend
+      const targetNoteId = noteToUpdate ? noteToUpdate.id : uuidv4();
+
+      const result = await structureNote(text, selectedNoteType, existingNotePayload, noteConfig, noteTheme || undefined, targetNoteId);
 
       if (noteToUpdate) {
         const fields = {
@@ -246,7 +257,7 @@ function App() {
       } else {
         const now = Date.now();
         const newNote: Note = {
-          id: uuidv4(),
+          id: targetNoteId,
           title: result.title || 'Nota sem título',
           content: result.content || text,
           noteType: selectedNoteType,
@@ -339,13 +350,14 @@ function App() {
       .join('\n\n---\n\n');
 
     const mergeNoteType = toMerge[0].noteType ?? selectedNoteType;
+    const newNoteId = uuidv4();
 
     try {
       setCurrentView('processing');
-      const result = await structureNote(combinedText, mergeNoteType, undefined, noteConfig);
+      const result = await structureNote(combinedText, mergeNoteType, undefined, noteConfig, undefined, newNoteId);
       const now = Date.now();
       const mergedNote: Note = {
-        id: uuidv4(),
+        id: newNoteId,
         title: result.title || 'Nota mesclada',
         content: result.content || combinedText,
         noteType: mergeNoteType,
@@ -368,6 +380,7 @@ function App() {
     if (sourceNotes.length === 0) return;
 
     const genNoteType = sourceNotes[0].noteType ?? selectedNoteType;
+    const newNoteId = uuidv4();
 
     try {
       setCurrentView('processing');
@@ -375,11 +388,12 @@ function App() {
         sourceNotes.map((n) => ({ title: n.title, content: n.content })),
         prompt,
         genNoteType,
-        noteConfig
+        noteConfig,
+        newNoteId
       );
       const now = Date.now();
       const newNote: Note = {
-        id: uuidv4(),
+        id: newNoteId,
         title: result.title || 'Nota gerada',
         content: result.content || '',
         noteType: genNoteType,
@@ -403,6 +417,8 @@ function App() {
       return;
     }
 
+    const newNoteId = uuidv4();
+
     try {
       setCurrentView('processing');
 
@@ -416,11 +432,12 @@ function App() {
         slidesPrompt || slidesContext,
         slidesContext,
         noteConfig,
-        notesContext
+        notesContext,
+        newNoteId
       );
       const now = Date.now();
       const newNote: Note = {
-        id: uuidv4(),
+        id: newNoteId,
         title: result.title || 'Slides',
         content: result.content || '',
         noteType: 'slides',
@@ -538,15 +555,40 @@ function App() {
             </p>
             <p className="text-xs text-muted-foreground/60">{BUILD_INFO}</p>
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="mt-1 text-muted-foreground hover:text-foreground"
-            onClick={logout}
-            title={`Sair (${user.email})`}
-          >
-            <SignOut className="w-5 h-5" />
-          </Button>
+          <div className="flex items-center gap-1 mt-1">
+            <Sheet>
+              <SheetTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-muted-foreground hover:text-foreground"
+                  title="Estatísticas de uso"
+                >
+                  <ChartBar className="w-5 h-5" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="right">
+                <SheetHeader className="border-b border-border pb-3">
+                  <SheetTitle className="flex items-center gap-2">
+                    <ChartBar className="w-4 h-4" />
+                    Uso de Tokens
+                  </SheetTitle>
+                </SheetHeader>
+                <div className="overflow-y-auto flex-1 pt-4">
+                  <TokenStats />
+                </div>
+              </SheetContent>
+            </Sheet>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-muted-foreground hover:text-foreground"
+              onClick={logout}
+              title={`Sair (${user.email})`}
+            >
+              <SignOut className="w-5 h-5" />
+            </Button>
+          </div>
         </header>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
