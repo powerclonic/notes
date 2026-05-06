@@ -1,5 +1,5 @@
-import fs from 'node:fs';
-import path from 'node:path';
+import pool from './db.js';
+import type { RowDataPacket } from 'mysql2';
 
 export interface User {
   id: string;
@@ -8,42 +8,38 @@ export interface User {
   createdAt: number;
 }
 
-const DB_PATH = process.env.USERS_DB_PATH ?? path.join(process.cwd(), 'data', 'users.json');
-
-function ensureDir() {
-  const dir = path.dirname(DB_PATH);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+interface UserRow extends RowDataPacket {
+  id: string;
+  email: string;
+  password_hash: string;
+  created_at: number;
 }
 
-function readAll(): User[] {
-  ensureDir();
-  if (!fs.existsSync(DB_PATH)) return [];
-  try {
-    return JSON.parse(fs.readFileSync(DB_PATH, 'utf-8')) as User[];
-  } catch {
-    return [];
-  }
+export async function findByEmail(email: string): Promise<User | undefined> {
+  const [rows] = await pool.execute<UserRow[]>(
+    'SELECT id, email, password_hash, created_at FROM users WHERE email = ?',
+    [email.toLowerCase()]
+  );
+  const row = rows[0];
+  if (!row) return undefined;
+  return { id: row.id, email: row.email, passwordHash: row.password_hash, createdAt: Number(row.created_at) };
 }
 
-function writeAll(users: User[]): void {
-  ensureDir();
-  fs.writeFileSync(DB_PATH, JSON.stringify(users, null, 2), 'utf-8');
+export async function findById(id: string): Promise<User | undefined> {
+  const [rows] = await pool.execute<UserRow[]>(
+    'SELECT id, email, password_hash, created_at FROM users WHERE id = ?',
+    [id]
+  );
+  const row = rows[0];
+  if (!row) return undefined;
+  return { id: row.id, email: row.email, passwordHash: row.password_hash, createdAt: Number(row.created_at) };
 }
 
-export function findByEmail(email: string): User | undefined {
-  return readAll().find((u) => u.email === email.toLowerCase());
-}
-
-export function findById(id: string): User | undefined {
-  return readAll().find((u) => u.id === id);
-}
-
-export function createUser(id: string, email: string, passwordHash: string): User {
-  const users = readAll();
-  const user: User = { id, email: email.toLowerCase(), passwordHash, createdAt: Date.now() };
-  users.push(user);
-  writeAll(users);
-  return user;
+export async function createUser(id: string, email: string, passwordHash: string): Promise<User> {
+  const createdAt = Date.now();
+  await pool.execute(
+    'INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)',
+    [id, email.toLowerCase(), passwordHash, createdAt]
+  );
+  return { id, email: email.toLowerCase(), passwordHash, createdAt };
 }

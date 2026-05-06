@@ -1,7 +1,6 @@
-import { useState, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { useLocalStorage } from '@/hooks/useLocalStorage';
-import { processImageOcr, structureNote, generateNoteFromNotes, generateSlides } from '@/lib/api';
+import { processImageOcr, structureNote, generateNoteFromNotes, generateSlides, getNotes, saveNote, patchNote, removeNote } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { LoginPage } from '@/components/LoginPage';
 import { Button } from '@/components/ui/button';
@@ -54,9 +53,8 @@ const BUILD_INFO = `v${__APP_VERSION__} · ${new Date(__BUILD_TIME__).toLocaleSt
 
 function App() {
   const { user, isLoading, logout } = useAuth();
-  // Notes keyed per user to isolate data between accounts
-  const notesKey = user ? `notes_${user.id}` : 'notes';
-  const [notes = [], setNotes] = useLocalStorage<Note[]>(notesKey, []);
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [notesLoading, setNotesLoading] = useState(false);
   const [currentView, setCurrentView] = useState<AppView>('home');
   const [currentImages, setCurrentImages] = useState<string[]>([]);
   const [processingProgress, setProcessingProgress] = useState<{ current: number; total: number } | null>(null);
@@ -74,6 +72,32 @@ function App() {
   const [slidesContextError, setSlidesContextError] = useState(false);
   const [slidesSelectedNotes, setSlidesSelectedNotes] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load notes from backend when user is authenticated
+  useEffect(() => {
+    if (!user) {
+      setNotes([]);
+      return;
+    }
+    setNotesLoading(true);
+    getNotes()
+      .then((apiNotes) =>
+        setNotes(
+          apiNotes.map((n) => ({
+            id: n.id,
+            title: n.title,
+            content: n.content,
+            noteType: n.noteType as NoteType | undefined,
+            originalImage: n.originalImage,
+            originalImages: n.originalImages,
+            createdAt: n.createdAt,
+            updatedAt: n.updatedAt,
+          }))
+        )
+      )
+      .catch(() => toast.error('Erro ao carregar notas.'))
+      .finally(() => setNotesLoading(false));
+  }, [user]);
 
   const handleImageCapture = (imageData: string | string[]) => {
     const images = Array.isArray(imageData) ? imageData : [imageData];
@@ -170,31 +194,36 @@ function App() {
       const result = await structureNote(text, selectedNoteType, existingNotePayload, noteConfig, noteTheme || undefined);
 
       if (noteToUpdate) {
-        const updatedNote: Note = {
-          ...noteToUpdate,
+        const fields = {
           title: result.title || noteToUpdate.title,
           content: result.content || text,
           noteType: selectedNoteType,
           originalImage: currentImages[0] || noteToUpdate.originalImage,
           originalImages: currentImages.length > 0 ? currentImages : noteToUpdate.originalImages,
-          updatedAt: Date.now(),
         };
-        setNotes((currentNotes = []) =>
-          currentNotes.map((n) => (n.id === updatedNote.id ? updatedNote : n))
+        const saved = await patchNote(noteToUpdate.id, fields);
+        setNotes((prev) =>
+          prev.map((n) =>
+            n.id === noteToUpdate.id
+              ? { ...n, ...fields, updatedAt: saved.updatedAt }
+              : n
+          )
         );
-        toast.success('Nota atualizada com sucesso!', { description: updatedNote.title });
+        toast.success('Nota atualizada com sucesso!', { description: fields.title });
       } else {
+        const now = Date.now();
         const newNote: Note = {
-          id: Date.now().toString(),
+          id: uuidv4(),
           title: result.title || 'Nota sem título',
           content: result.content || text,
           noteType: selectedNoteType,
           originalImage: currentImages[0] || undefined,
           originalImages: currentImages.length > 0 ? currentImages : undefined,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
+          createdAt: now,
+          updatedAt: now,
         };
-        setNotes((currentNotes) => [newNote, ...currentNotes]);
+        await saveNote({ ...newNote, noteType: newNote.noteType });
+        setNotes((prev) => [newNote, ...prev]);
         toast.success('Nota salva com sucesso!', { description: newNote.title });
       }
 
@@ -208,18 +237,22 @@ function App() {
     } catch (error) {
       toast.error('Erro ao estruturar nota. Salvando texto bruto...');
 
+      const now = Date.now();
       const newNote: Note = {
-        id: Date.now().toString(),
+        id: uuidv4(),
         title: 'Nota sem título',
         content: text,
         noteType: selectedNoteType,
         originalImage: currentImages[0] || undefined,
         originalImages: currentImages.length > 0 ? currentImages : undefined,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+        createdAt: now,
+        updatedAt: now,
       };
 
-      setNotes((currentNotes) => [newNote, ...currentNotes]);
+      saveNote({ ...newNote, noteType: newNote.noteType }).catch((err) => {
+        console.error('Failed to persist fallback note:', err);
+      });
+      setNotes((prev) => [newNote, ...prev]);
       setCurrentView('home');
       setNoteToUpdate(null);
       setNoteTheme('');
@@ -232,18 +265,36 @@ function App() {
     setCurrentView('edit');
   };
 
-  const handleSaveEdit = (updatedNote: Note) => {
-    setNotes((currentNotes = []) =>
-      currentNotes.map((note) => (note.id === updatedNote.id ? updatedNote : note))
-    );
-    toast.success('Nota atualizada com sucesso!');
+  const handleSaveEdit = async (updatedNote: Note) => {
+    try {
+      const saved = await patchNote(updatedNote.id, {
+        title: updatedNote.title,
+        content: updatedNote.content,
+        noteType: updatedNote.noteType,
+        originalImage: updatedNote.originalImage,
+        originalImages: updatedNote.originalImages,
+      });
+      setNotes((prev) =>
+        prev.map((note) =>
+          note.id === updatedNote.id ? { ...updatedNote, updatedAt: saved.updatedAt } : note
+        )
+      );
+      toast.success('Nota atualizada com sucesso!');
+    } catch {
+      toast.error('Erro ao atualizar nota. Tente novamente.');
+    }
     setEditingNote(null);
     setCurrentView('home');
   };
 
-  const handleDeleteNote = (noteId: string) => {
-    setNotes((currentNotes = []) => currentNotes.filter((note) => note.id !== noteId));
-    toast.success('Nota excluída com sucesso!');
+  const handleDeleteNote = async (noteId: string) => {
+    try {
+      await removeNote(noteId);
+      setNotes((prev) => prev.filter((note) => note.id !== noteId));
+      toast.success('Nota excluída com sucesso!');
+    } catch {
+      toast.error('Erro ao excluir nota. Tente novamente.');
+    }
   };
 
   const handleMergeNotes = async (noteIds: string[]) => {
@@ -259,15 +310,17 @@ function App() {
     try {
       setCurrentView('processing');
       const result = await structureNote(combinedText, mergeNoteType, undefined, noteConfig);
+      const now = Date.now();
       const mergedNote: Note = {
         id: uuidv4(),
         title: result.title || 'Nota mesclada',
         content: result.content || combinedText,
         noteType: mergeNoteType,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+        createdAt: now,
+        updatedAt: now,
       };
-      setNotes((currentNotes = []) => [mergedNote, ...currentNotes]);
+      await saveNote({ ...mergedNote, noteType: mergedNote.noteType });
+      setNotes((prev) => [mergedNote, ...prev]);
       toast.success('Notas juntadas com sucesso!', { description: mergedNote.title });
     } catch {
       toast.error('Erro ao juntar notas. Tente novamente.');
@@ -291,15 +344,17 @@ function App() {
         genNoteType,
         noteConfig
       );
+      const now = Date.now();
       const newNote: Note = {
         id: uuidv4(),
         title: result.title || 'Nota gerada',
         content: result.content || '',
         noteType: genNoteType,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+        createdAt: now,
+        updatedAt: now,
       };
-      setNotes((currentNotes = []) => [newNote, ...currentNotes]);
+      await saveNote({ ...newNote, noteType: newNote.noteType });
+      setNotes((prev) => [newNote, ...prev]);
       toast.success('Nota gerada com sucesso!', { description: newNote.title });
     } catch {
       toast.error('Erro ao gerar nota. Tente novamente.');
@@ -330,15 +385,17 @@ function App() {
         noteConfig,
         notesContext
       );
+      const now = Date.now();
       const newNote: Note = {
         id: uuidv4(),
         title: result.title || 'Slides',
         content: result.content || '',
         noteType: 'slides',
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+        createdAt: now,
+        updatedAt: now,
       };
-      setNotes((currentNotes = []) => [newNote, ...currentNotes]);
+      await saveNote({ ...newNote, noteType: newNote.noteType });
+      setNotes((prev) => [newNote, ...prev]);
       toast.success('Slides gerados com sucesso!', { description: newNote.title });
       setSlidesPrompt('');
       setSlidesContext('');
@@ -353,7 +410,7 @@ function App() {
   };
 
 
-  if (isLoading) {
+  if (isLoading || notesLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <motion.div animate={{ rotate: 360 }} transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}>
