@@ -6,6 +6,7 @@ import { LoginPage } from '@/components/LoginPage';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
@@ -22,7 +23,7 @@ import { CameraCapture } from '@/components/CameraCapture';
 import { WordReviewInterface } from '@/components/WordReviewInterface';
 import { NoteLibrary } from '@/components/NoteLibrary';
 import { NoteEditor } from '@/components/NoteEditor';
-import { Camera, Upload, Sparkle, X, SignOut } from '@phosphor-icons/react';
+import { Camera, Upload, Sparkle, X, SignOut, CaretDown } from '@phosphor-icons/react';
 import {
   Note,
   NoteType,
@@ -70,6 +71,7 @@ function App() {
   const [noteConfig, setNoteConfig] = useState<NoteConfig>(DEFAULT_NOTE_CONFIG);
   const [noteTheme, setNoteTheme] = useState<string>('');
   const [showSlidesForm, setShowSlidesForm] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [slidesPrompt, setSlidesPrompt] = useState('');
   const [slidesContext, setSlidesContext] = useState('');
   const [slidesContextError, setSlidesContextError] = useState(false);
@@ -488,6 +490,15 @@ function App() {
                   </div>
                 </div>
 
+                {/* Advanced settings collapsible */}
+                <Collapsible open={showAdvanced} onOpenChange={setShowAdvanced}>
+                  <CollapsibleTrigger asChild>
+                    <button className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors w-full py-1">
+                      <CaretDown className={`w-3 h-3 transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
+                      Configurações avançadas
+                    </button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="space-y-3 pt-3 border-t border-border mt-1">
                 {/* Detail level */}
                 <div>
                   <p className="text-sm font-medium text-foreground mb-2">Nível de detalhe</p>
@@ -597,6 +608,8 @@ function App() {
                     </p>
                   )}
                 </div>
+                  </CollapsibleContent>
+                </Collapsible>
               </CardContent>
             </Card>
 
