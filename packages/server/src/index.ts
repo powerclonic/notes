@@ -273,7 +273,7 @@ Regras:
           startIndex: typeof entry.s === 'number' ? entry.s : 0,
           endIndex: typeof entry.e === 'number' ? entry.e : 0,
           suggestions: Array.isArray(entry.sg) ? (entry.sg as string[]) : undefined,
-        })).filter((w) => w.word !== '')
+        })).filter((w) => w.word.trim() !== '')
       : [];
 
     // ------------------------------------------------------------------

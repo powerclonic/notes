@@ -96,9 +96,10 @@ function App() {
       setCurrentImages(images);
       setCurrentView('processing');
       processImages(images);
+    }).finally(() => {
+      // Reset after processing so users can retry with the same files if needed
+      event.target.value = '';
     });
-    // Reset the input so the same file can be re-selected
-    event.target.value = '';
   };
 
   const processImages = async (images: string[]) => {
@@ -123,7 +124,7 @@ function App() {
               endIndex: w.endIndex + offset,
             });
           }
-          textOffset += result.fullText.length + 7; // +7 for "\n\n---\n\n"
+        textOffset += result.fullText.length + '\n\n---\n\n'.length;
         }
       }
 
