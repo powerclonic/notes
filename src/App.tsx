@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { processImageOcr, structureNote, generateNoteFromNotes, generateSlides } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
@@ -259,7 +260,7 @@ function App() {
       setCurrentView('processing');
       const result = await structureNote(combinedText, mergeNoteType, undefined, noteConfig);
       const mergedNote: Note = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         title: result.title || 'Nota mesclada',
         content: result.content || combinedText,
         noteType: mergeNoteType,
@@ -291,7 +292,7 @@ function App() {
         noteConfig
       );
       const newNote: Note = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         title: result.title || 'Nota gerada',
         content: result.content || '',
         noteType: genNoteType,
@@ -330,7 +331,7 @@ function App() {
         notesContext
       );
       const newNote: Note = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         title: result.title || 'Slides',
         content: result.content || '',
         noteType: 'slides',
