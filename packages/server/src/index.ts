@@ -436,6 +436,11 @@ Regras:
       max_completion_tokens: batchMaxTokens,
     });
 
+    if (!batchResponse.choices.length) {
+      res.status(500).json({ error: 'No response from OCR model' });
+      return;
+    }
+
     const finishReason = batchResponse.choices[0].finish_reason;
     if (finishReason === 'length') {
       res.status(422).json({ error: 'OCR batch response was truncated due to token limit. Try reducing the number of images per batch.' });
